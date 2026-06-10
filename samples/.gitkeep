@@ -1,0 +1,2 @@
+# Example input images for inference demos (git-ignored media):
+#   cat.png, dog.png, ... used by ./infer and the Stage 7 server.

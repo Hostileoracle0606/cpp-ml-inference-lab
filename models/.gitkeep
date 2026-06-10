@@ -1,0 +1,2 @@
+# Trained + exported model artifacts live here (git-ignored binaries):
+#   cifar10_cnn.pt   (Stage 1)   cifar10_cnn.onnx (Stage 2)

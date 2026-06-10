@@ -1,0 +1,2 @@
+# Benchmark harness lands here in Stage 5:
+#   inference_benchmark.cpp (preprocessing vs model-exec vs end-to-end, p50/p95)

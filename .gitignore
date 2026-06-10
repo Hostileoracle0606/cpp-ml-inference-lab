@@ -1,0 +1,45 @@
+# ─── C++ / CMake build artifacts ───────────────────────────────
+build/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+compile_commands.json
+
+# ─── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# ─── Model artifacts (large binaries — keep dirs via .gitkeep) ──
+models/*.pt
+models/*.pth
+models/*.onnx
+!models/.gitkeep
+
+# ─── Datasets (downloaded at train time) ───────────────────────
+data/
+python/data/
+
+# ─── Sample inputs (keep the dir, ignore bulky media) ──────────
+samples/*.png
+samples/*.jpg
+samples/*.jpeg
+!samples/.gitkeep
+
+# ─── Editors / OS ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store

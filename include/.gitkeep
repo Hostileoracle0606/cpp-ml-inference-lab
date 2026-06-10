@@ -1,0 +1,2 @@
+# Public C++ headers land here in Stage 4:
+#   inference_engine.hpp, image_preprocessor.hpp, tensor_utils.hpp
