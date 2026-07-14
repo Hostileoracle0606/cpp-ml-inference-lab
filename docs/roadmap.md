@@ -1,71 +1,90 @@
 # Roadmap
 
-Stage-by-stage plan. Each stage produces a public artifact and a resume-ready outcome.
+The original nine-stage idea is now split into a validated v1 source release and evidence-driven
+follow-up work. A checkmark means the code path and its relevant automated gate exist; it does not
+stand in for unmeasured model quality or portable performance.
 
-## Stage 0 — Project setup & positioning ✅
-- [x] Directory skeleton (`python/`, `src/`, `include/`, `tests/`, `benchmarks/`, `models/`, `samples/`)
-- [x] README (recruiter-readable)
-- [x] Architecture doc
-- [x] Roadmap doc
-- [x] CMake build that compiles a CLI skeleton
-- [ ] First git commit
+## V1 release scope
 
-## Stage 1 — PyTorch training baseline
-- [ ] `python/train.py` — small CNN on CIFAR-10
-- [ ] `models/cifar10_cnn.pt`
-- [ ] Validation accuracy reported in README
-- **Artifact:** accuracy table.
+### 1. Python model production — complete
 
-## Stage 2 — ONNX export & parity check
-- [ ] `python/export_onnx.py` → `models/cifar10_cnn.onnx`
-- [ ] `python/verify_onnx.py` — PyTorch vs ONNX Runtime max-diff < epsilon
-- **Artifact:** parity table.
+- [x] Shared `SmallCNN`, labels, normalization, and checkpoint loader in `python/model.py`.
+- [x] Deterministic CIFAR-10 dataloaders, training, evaluation, and metadata checkpoint.
+- [x] Synthetic tests for optimization, exact accuracy calculation, empty loaders, and transforms.
+- [ ] Train and publish a reference checkpoint/accuracy result.
 
-## Stage 3 — C++ inference CLI
-- [ ] `InferenceEngine` (ONNX Runtime session)
-- [ ] Image preprocessing in C++
-- [ ] `./infer --model … --image …` prints label / confidence / latency
-- **Artifact:** terminal demo.
+The unchecked artifact is deliberately not required for the source release. No accuracy number is
+claimed until a reproducible full training run is captured.
 
-## Stage 4 — Clean C++ architecture & tests
-- [ ] Header/source separation (`inference_engine`, `image_preprocessor`, `tensor_utils`)
-- [ ] Unit tests for preprocessing, tensor utils, decoding
-- **Artifact:** architecture diagram + green tests.
+### 2. ONNX export and parity — complete
 
-## Stage 5 — Benchmarking
-- [ ] `benchmarks/inference_benchmark.cpp`
-- [ ] Preprocessing vs model-execution vs end-to-end latency
-- [ ] p50 / p95 / throughput across batch sizes
-- **Artifact:** latency table.
+- [x] Named float32 `input`/`logits` export with dynamic batch dimension.
+- [x] ONNX structural checker coverage.
+- [x] Deterministic batch-two PyTorch/ONNX Runtime comparison.
+- [x] V1 evidence: max absolute logit difference `2.9802322e-08 < 1e-4`; classes matched.
 
-## Stage 6 — Optimization pass
-- [ ] Session reuse, buffer reuse, batching, release build
-- [ ] Before/after measurements
-- **Artifact:** before/after table.
+### 3. Modular C++ inference — complete
 
-## Stage 7 — C++ inference server
-- [ ] `GET /health`, `POST /predict`
-- [ ] JSON response with class / confidence / latency
-- **Artifact:** `curl /predict` demo.
+- [x] `cpp_ml_core` target with domain, PPM loader, preprocessing, decoder, engine, and pipeline.
+- [x] Narrow injected backend interface and session-owning ONNX Runtime adapter.
+- [x] Graph endpoint/type/shape validation and batch-one runtime output validation.
+- [x] Strict CLI argument/error contract and formatted prediction output.
+- [x] Official ONNX Runtime 1.19.2 macOS arm64 end-to-end run.
 
-## Stage 8 — Dockerization & reproducibility
-- [ ] `Dockerfile`, `docs/setup.md`
-- [ ] One-command build & run
-- **Artifact:** reproducible setup.
+### 4. Verification — complete
 
-## Stage 9 — Final polish & portfolio packaging
-- [ ] Final README, demo GIF, benchmark tables
-- [ ] Resume bullets, LinkedIn post
-- **Artifact:** polished, pinned repo.
+- [x] Dependency-free C++ value/preprocessing/softmax/PPM/orchestration suite.
+- [x] CLI success/failure contract.
+- [x] Python train/export/parity suite that does not download CIFAR-10.
+- [x] Optional model-backed C++ ORT end-to-end CTest.
+- [x] Default Release evidence: 4/4 CTest entries passed.
+- [x] Runtime-enabled evidence: 5/5 CTest entries passed.
 
----
+### 5. Benchmark harness — complete
 
-## Compressed 5-week recruiting track
+- [x] Preprocessing, runtime-only, and in-memory pipeline boundaries.
+- [x] Warm-up exclusion, monotonic clock, mean, nearest-rank p50/p95, and throughput.
+- [x] Build type and iteration metadata in output.
+- [ ] Publish portable reference-machine results for a trained model.
 
-| Week | Milestone | Public artifact |
-|-----:|-----------|-----------------|
-| 1 | PyTorch train + ONNX export | accuracy + parity tables |
-| 2 | C++ inference CLI | terminal demo |
-| 3 | Architecture + tests | architecture diagram |
-| 4 | Benchmarks | latency table |
-| 5 | Server + final polish | `curl /predict` demo |
+The harness is validated; absolute benchmark claims remain intentionally unpublished until the
+model artifact, machine, runtime configuration, and command are recorded together.
+
+## Post-v1 priorities
+
+### V1.1 — reproducible model evidence
+
+- [ ] Pin a tested Python environment with a lock/constraints file.
+- [ ] Train a reference checkpoint with captured seed, epochs, accuracy, and hardware.
+- [ ] Publish artifact provenance/checksum outside normal Git history.
+- [ ] Capture trained-model parity, C++ prediction, and benchmark tables.
+- [ ] Add a full Python-to-C++ preprocessing fixture if the model contract changes.
+
+### V1.2 — measured optimization
+
+- [ ] Establish reference release-build measurements.
+- [ ] Compare buffer reuse and batched inference with the same workload.
+- [ ] Evaluate ORT session/thread settings and graph optimization levels.
+- [ ] Keep changes only when the benchmark delta and correctness gates justify them.
+
+### V2 — serving and packaging
+
+- [ ] Define concurrency/thread-safety requirements before adding a server.
+- [ ] Add `GET /health` and `POST /predict` as adapters around `cpp_ml_core`.
+- [ ] Add request limits, structured errors, and integration/load tests.
+- [ ] Containerize a pinned CPU runtime and model acquisition flow.
+- [ ] Add CI across supported platforms and an explicit release artifact policy.
+
+### Later exploration
+
+- [ ] PNG/JPEG decoder adapter suitable for the intended trust boundary.
+- [ ] Quantization with before/after accuracy and latency evidence.
+- [ ] Additional execution providers or model families after metadata/configuration design.
+- [ ] Multi-model routing and concurrency only when a real consumer requires them.
+
+## Decision discipline
+
+Architecture changes are recorded in [decision_matrix.md](decision_matrix.md) with alternatives,
+consequences, and revisit triggers. The release boundary and gates live in
+[v1_plan.md](v1_plan.md). Each vertical slice ends with an evidence checkpoint; green optional tests
+or random-weight artifacts are never presented as model-quality proof.

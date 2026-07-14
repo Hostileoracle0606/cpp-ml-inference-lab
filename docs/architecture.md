@@ -1,93 +1,147 @@
 # Architecture
 
-This document describes how a model moves from a Python training script to a C++ runtime
-serving predictions, and the contracts that keep the two sides consistent.
+V1 is a source-to-runtime vertical slice for one explicit model contract. It separates model
+production in Python from portable inference in C++, with ONNX as the artifact boundary.
 
-## Data flow
+## End-to-end data flow
 
 ```text
- ┌─────────────────────┐
- │  python/train.py    │   Train a small CNN on CIFAR-10.
- │  (PyTorch)          │   Output: models/cifar10_cnn.pt  (weights + arch)
- └──────────┬──────────┘
-            │
-            ▼
- ┌─────────────────────┐
- │ python/export_onnx  │   torch.onnx.export(): trace the model into a
- │  .py                │   language-neutral computation graph.
- │                     │   Output: models/cifar10_cnn.onnx
- └──────────┬──────────┘
-            │
-            ▼
- ┌─────────────────────┐
- │ python/verify_onnx  │   Run the SAME input through PyTorch and ONNX
- │  .py                │   Runtime; assert max output diff < epsilon.
- └──────────┬──────────┘
-            │   (parity gate — only a verified .onnx crosses into C++)
-            ▼
- ┌─────────────────────┐
- │  C++ inference core │   ONNX Runtime loads the graph once, builds input
- │  src/ + include/    │   tensors, runs the session, decodes logits.
- └──────────┬──────────┘
-            │
-   ┌────────┼─────────────────────┐
-   ▼        ▼                     ▼
- CLI      Benchmarks           HTTP server
- ./infer  p50/p95/throughput   /predict, /health
+python/model.py
+   | shared CNN, labels, normalization, checkpoint loader
+   v
+python/train.py ------------------------------> models/cifar10_cnn.pt
+                                                    |
+                                                    v
+python/export_onnx.py ------------------------> models/cifar10_cnn.onnx
+                                                    |
+                          +-------------------------+----------------------+
+                          |                                                |
+                          v                                                v
+                python/verify_onnx.py                              C++ ONNX adapter
+                PyTorch vs ORT logits                          metadata validation + run
+                          |                                                |
+                          +---------------- parity gate -------------------+
+                                                                           v
+                                                                CLI and benchmark adapters
 ```
 
-## Components and responsibilities
+The parity gate uses an identical seeded batch in PyTorch and Python ONNX Runtime. A graph passes
+only when maximum absolute logit difference is below `1e-4` and every top class matches.
 
-| Component | Lives in | Responsibility |
-|-----------|----------|----------------|
-| Training | `python/train.py` | Define the CNN, train on CIFAR-10, save `.pt`. |
-| Export | `python/export_onnx.py` | Convert `.pt` → `.onnx` with correct input/output shapes. |
-| Parity check | `python/verify_onnx.py` | Numerically compare PyTorch vs ONNX Runtime. |
-| `InferenceEngine` | `include/`, `src/` | Own the ONNX Runtime session; `predict(Image) → Prediction`. |
-| Preprocessing | `include/`, `src/` | Decode image → normalized CHW float tensor (must match training). |
-| CLI | `src/main.cpp` | Parse args, call the engine, print label/confidence/latency. |
-| Benchmarks | `benchmarks/` | Measure preprocessing vs model-execution vs end-to-end latency. |
-| Server | `src/server.cpp` (Stage 7) | Expose `/predict` and `/health`. |
+## C++ dependency direction
 
-## Target core abstractions (Stage 4)
-
-```cpp
-struct Prediction {
-    std::string label;
-    float       confidence;
-    double      latency_ms;
-};
-
-class InferenceEngine {
-public:
-    explicit InferenceEngine(const std::string& model_path);  // load once (RAII)
-    Prediction predict(const Image& image);                   // run many times
-};
+```text
+src/main.cpp (CLI)
+        |
+        v
+InferencePipeline (application facade)
+   |---------------------|--------------------|
+   v                     v                    v
+FileImageLoader   Cifar10Preprocessor   SoftmaxDecoder
+                                               ^
+                                               |
+                                      InferenceEngine
+                                               |
+                                               v
+                                      IInferenceBackend
+                                               ^
+                                               |
+                                      OnnxRuntimeBackend
 ```
 
-The engine loads the ONNX session **once** in its constructor and reuses it across calls —
-session creation is expensive, per-request inference should not pay that cost. This is the
-foundation that the Stage 6 optimization pass builds on (session reuse, buffer reuse, batching).
+The CLI depends on `cpp_ml_core`; the core never depends on CLI parsing or terminal formatting.
+ONNX Runtime headers are private to the runtime adapter implementation.
 
-## The preprocessing-parity contract
+## Components and ownership
 
-The single most common source of "works in Python, wrong in C++" bugs is **train/serve skew**:
-the C++ side preprocesses images differently from how the model was trained.
+| Component | Responsibility | Ownership/lifetime |
+|---|---|---|
+| `Image` | Validated RGB8 HWC buffer and dimensions | Ordinary value |
+| `Tensor` | Validated float buffer and shape | Ordinary value |
+| `Prediction` | Class, probabilities, and labelled timings | Ordinary value |
+| `FileImageLoader` | Decode P3/P6 PPM and enforce 16 MP safety cap | Stateless concrete adapter |
+| `Cifar10Preprocessor` | Bilinear resize, HWC-to-CHW, scale, normalize | Stateless concrete policy |
+| `SoftmaxDecoder` | Stable softmax, argmax, class lookup | Concrete value/policy |
+| `IInferenceBackend` | Minimal `Tensor -> ModelOutput` runtime seam | Polymorphic test/adapter boundary |
+| `OnnxRuntimeBackend` | Validate graph metadata and execute one ORT session | Owns `Ort::Env`, options, and session |
+| `InferenceEngine` | Move-only owner/executor for an injected backend | Owns one backend via `unique_ptr` |
+| `InferencePipeline` | Compose load/preprocess/run/decode and timings | Owns concrete policies plus engine |
+| `infer` | Validate flags, map exceptions to exit codes, format prediction | Process adapter |
+| `inference_benchmark` | Warm up, measure, summarize named boundaries | Process adapter |
 
-To run, both sides must agree on:
+## Frozen model and preprocessing contract
 
-1. **Resize / crop** to the model's expected input size (32×32 for CIFAR-10).
-2. **Channel order** — PyTorch uses CHW (channels-first); image libraries often give HWC.
-3. **Dtype & scaling** — pixels `[0, 255]` uint8 → `[0, 1]` float.
-4. **Normalization** — subtract per-channel mean, divide by per-channel std (the exact
-   constants used in `train.py`).
+| Field | Contract |
+|---|---|
+| File input | One P3 or P6 PPM image, treated as RGB sample triplets |
+| Decoded representation | Unsigned 8-bit interleaved HWC |
+| Resize | Bilinear to 32x32 when necessary |
+| Model tensor | Contiguous float32 NCHW `[N, 3, 32, 32]` |
+| Pixel scaling | `value / 255.0` |
+| Mean | `(0.4914, 0.4822, 0.4465)` |
+| Standard deviation | `(0.2470, 0.2435, 0.2616)` |
+| ONNX input | Exactly one float32 endpoint named `input`; batch is dynamic or one |
+| ONNX output | First float32 endpoint named `logits`, shape `[N, 10]` |
+| Class order | airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck |
+| Confidence | Winning value after numerically stable softmax |
 
-`verify_onnx.py` checks model-graph parity; the C++ unit tests in Stage 4 check that C++
-preprocessing reproduces the Python tensor for the same image. Both gates must pass.
+The Python checkpoint also stores the class and normalization metadata for provenance. V1 keeps
+the inference contract compile-time explicit rather than adding a JSON parser/configuration system
+for a single model family. C++ tests cover buffer invariants, channel order, boundary normalization,
+resize behavior, stable softmax, PPM failures, backend reuse, and pipeline orchestration. Python
+tests cover the corresponding normalization declarations, model shape, train/evaluate helpers,
+export metadata, and parity.
 
-## Design principles
+## Runtime validation and RAII
 
-- **Measure, don't guess** — every optimization in Stage 6 is justified by a benchmark delta.
-- **Separation of concerns** — preprocessing, inference, and I/O are independent and testable.
-- **RAII for resources** — the ONNX session lifetime is tied to the `InferenceEngine` object.
-- **Portability is the point** — the `.onnx` artifact is the contract between Python and C++.
+`OnnxRuntimeBackend` creates its environment and session once. Construction rejects a missing
+model, incorrect endpoint count/name, non-float types, or incompatible rank/dimensions. Each run
+then enforces the concrete batch-one input and `[1,10]` output expected by the CLI.
+
+ONNX Runtime's `GetTensorTypeAndShapeInfo()` on a session type returns an unowned view. V1 keeps
+the owning `Ort::TypeInfo` local alive while reading that view. A real-runtime checkpoint caught
+this lifetime rule after a chained temporary caused a valid float model to be misread; the fixed
+path was rerun against the official 1.19.2 macOS arm64 release.
+
+The backend session is reused across calls. Owning raw pointers, global sessions, and per-request
+session construction are deliberately absent.
+
+## OOP and SOLID tradeoffs
+
+- **Single responsibility:** file decoding, tensor transformation, runtime execution, prediction
+  decoding, orchestration, and presentation change for different reasons and live separately.
+- **Dependency inversion:** orchestration depends on the small runtime capability, while concrete
+  ONNX details stay at the edge. A recording fake exercises the same interface in unit tests.
+- **Interface segregation:** `IInferenceBackend` exposes one operation; there is no broad model,
+  logging, benchmarking, or server interface.
+- **Liskov substitution:** fake and ONNX backends accept the same validated tensor and return the
+  same `ModelOutput` contract.
+- **RAII:** engine/backend ownership and ORT wrapper lifetimes encode cleanup in object lifetime.
+- **Composition over inheritance:** inheritance appears only at the runtime substitution seam;
+  domain data and pure policies remain concrete values.
+
+The design is intentionally not “class per noun.” Stateless calculations can remain concrete, and
+new plug-in registries or configuration layers wait until a second model/backend proves the need.
+
+## Measurement boundaries
+
+The benchmark uses `std::chrono::steady_clock`, discards warm-up iterations, and reports
+nearest-rank p50/p95, mean, and throughput:
+
+- `preprocessing`: an already decoded in-memory `Image` to `Tensor`.
+- `runtime_only`: engine validation plus one reused-session inference for a prepared tensor.
+- `end_to_end`: in-memory `Image` through preprocessing, inference, and softmax decoding.
+
+`end_to_end` excludes file open/decode and session construction. Output includes build type,
+language level, warm-up count, and measured iterations so results are not mistaken for a single
+best-case call.
+
+## Failure policy and limitations
+
+Core modules throw contextual standard exceptions. `main` owns terminal presentation and maps
+usage errors to exit 2 and inference/runtime errors to exit 1. The portable decoder limits PPM
+dimensions and decoded pixels before allocation.
+
+V1 assumes one CPU model and one caller. It makes no thread-safety, server, untrusted-media,
+PNG/JPEG, GPU, or quantified performance/accuracy claim. Those constraints are release boundaries,
+not hidden production promises.

@@ -1,123 +1,188 @@
-"""Stage 1 — Train a small CNN on CIFAR-10.
-
-This is the Stage 0 *skeleton*: the model architecture and program structure are
-defined, but the data-loading and training/eval loops are left as Stage 1 work
-(marked with `TODO (Stage 1)` and `raise NotImplementedError`).
-
-Target usage (once Stage 1 lands):
-    python train.py --epochs 20 --batch-size 128 --out ../models/cifar10_cnn.pt
-"""
+"""Train the v1 CIFAR-10 CNN and write a reproducible checkpoint."""
 
 from __future__ import annotations
 
 import argparse
+import random
 from pathlib import Path
+from typing import Iterable
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
-# CIFAR-10 class order is fixed by torchvision; the C++ decoder must match this.
-CIFAR10_CLASSES = (
-    "airplane", "automobile", "bird", "cat", "deer",
-    "dog", "frog", "horse", "ship", "truck",
-)
-
-# Per-channel normalization stats. These exact constants are the train/serve
-# contract — the C++ preprocessor (Stage 3) must reuse them verbatim.
-CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
-CIFAR10_STD = (0.2470, 0.2435, 0.2616)
+from model import CIFAR10_CLASSES, CIFAR10_MEAN, CIFAR10_STD, SmallCNN
 
 
-class SmallCNN(nn.Module):
-    """A compact conv net sized for CIFAR-10 (3x32x32 -> 10 logits).
-
-    Deliberately small so that C++ inference latency stays in the single-digit
-    millisecond range — the point of the project is the deployment layer, not
-    squeezing out the last accuracy point.
-    """
-
-    def __init__(self, num_classes: int = 10) -> None:
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),   # 32x32
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),                              # 16x16
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),                              # 8x8
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64 * 8 * 8, 256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(256, num_classes),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.features(x)
-        return self.classifier(x)
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def get_dataloaders(batch_size: int, data_dir: str):
-    """Return (train_loader, test_loader) for CIFAR-10.
+def get_dataloaders(
+    batch_size: int,
+    data_dir: str,
+    *,
+    num_workers: int = 0,
+    seed: int = 1337,
+    download: bool = True,
+):
+    """Return training and evaluation loaders with the shared normalization."""
 
-    TODO (Stage 1): build torchvision.datasets.CIFAR10 with a transform that
-    applies ToTensor() + Normalize(CIFAR10_MEAN, CIFAR10_STD), wrap in DataLoaders.
-    """
-    raise NotImplementedError("Stage 1: implement CIFAR-10 data loading")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if num_workers < 0:
+        raise ValueError("num_workers must be non-negative")
+
+    from torchvision import datasets, transforms
+
+    train_transform = transforms.Compose(
+        [
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
+        ]
+    )
+    evaluation_transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
+        ]
+    )
+    train_dataset = datasets.CIFAR10(
+        root=data_dir, train=True, download=download, transform=train_transform
+    )
+    test_dataset = datasets.CIFAR10(
+        root=data_dir, train=False, download=download, transform=evaluation_transform
+    )
+    generator = torch.Generator().manual_seed(seed)
+    common = {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": torch.cuda.is_available(),
+    }
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, shuffle=True, generator=generator, **common
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, shuffle=False, **common
+    )
+    return train_loader, test_loader
 
 
-def train_one_epoch(model, loader, optimizer, device) -> float:
-    """Run one training epoch; return mean loss.
+def train_one_epoch(model, loader: Iterable, optimizer, device: torch.device) -> float:
+    """Train for one epoch and return sample-weighted mean cross-entropy."""
 
-    TODO (Stage 1): standard loop — zero_grad, forward, cross_entropy, backward, step.
-    """
-    raise NotImplementedError("Stage 1: implement the training loop")
+    model.train()
+    total_loss = 0.0
+    total_samples = 0
+    for features, targets in loader:
+        features = features.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
+        optimizer.zero_grad(set_to_none=True)
+        logits = model(features)
+        loss = F.cross_entropy(logits, targets)
+        loss.backward()
+        optimizer.step()
+
+        sample_count = int(targets.shape[0])
+        total_loss += float(loss.detach().item()) * sample_count
+        total_samples += sample_count
+    if total_samples == 0:
+        raise ValueError("training loader produced no samples")
+    return total_loss / total_samples
 
 
 @torch.no_grad()
-def evaluate(model, loader, device) -> float:
-    """Return top-1 accuracy on the given loader.
+def evaluate(model, loader: Iterable, device: torch.device) -> float:
+    """Evaluate exact top-1 accuracy and leave the model in evaluation mode."""
 
-    TODO (Stage 1): forward pass, argmax, compare to labels, accumulate accuracy.
-    """
-    raise NotImplementedError("Stage 1: implement evaluation")
+    model.eval()
+    correct = 0
+    total = 0
+    for features, targets in loader:
+        features = features.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
+        predictions = model(features).argmax(dim=1)
+        correct += int((predictions == targets).sum().item())
+        total += int(targets.shape[0])
+    if total == 0:
+        raise ValueError("evaluation loader produced no samples")
+    return correct / total
+
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a small CNN on CIFAR-10.")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--data-dir", type=str, default="./data")
-    parser.add_argument("--out", type=str, default="../models/cifar10_cnn.pt")
+    parser.add_argument("--lr", type=float, default=1.0e-3)
+    parser.add_argument("--data-dir", type=Path, default=REPO_ROOT / "python" / "data")
+    parser.add_argument("--out", type=Path, default=REPO_ROOT / "models" / "cifar10_cnn.pt")
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--no-download", action="store_true")
+    parser.add_argument(
+        "--device", choices=("auto", "cpu", "cuda"), default="auto"
+    )
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[train] device={device}  classes={len(CIFAR10_CLASSES)}")
+    if args.epochs <= 0 or args.batch_size <= 0 or args.lr <= 0:
+        parser.error("--epochs, --batch-size, and --lr must be positive")
+    if args.num_workers < 0:
+        parser.error("--num-workers must be non-negative")
+    if args.device == "cuda" and not torch.cuda.is_available():
+        parser.error("--device cuda requested, but CUDA is unavailable")
 
-    model = SmallCNN().to(device)
-
-    # TODO (Stage 1): wire up the real training run.
-    #   train_loader, test_loader = get_dataloaders(args.batch_size, args.data_dir)
-    #   optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    #   for epoch in range(args.epochs):
-    #       loss = train_one_epoch(model, train_loader, optimizer, device)
-    #       acc = evaluate(model, test_loader, device)
-    #       print(f"epoch {epoch}: loss={loss:.4f} acc={acc:.4f}")
-    #   Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    #   torch.save(model.state_dict(), args.out)
-
-    raise SystemExit(
-        "train.py is a Stage 0 skeleton — implement get_dataloaders / "
-        "train_one_epoch / evaluate in Stage 1."
+    seed_everything(args.seed)
+    device_name = (
+        "cuda"
+        if args.device == "auto" and torch.cuda.is_available()
+        else "cpu" if args.device == "auto" else args.device
     )
+    device = torch.device(device_name)
+    print(f"[train] device={device} seed={args.seed} classes={len(CIFAR10_CLASSES)}")
+
+    train_loader, test_loader = get_dataloaders(
+        args.batch_size,
+        str(args.data_dir),
+        num_workers=args.num_workers,
+        seed=args.seed,
+        download=not args.no_download,
+    )
+    model = SmallCNN().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    best_accuracy = 0.0
+
+    for epoch in range(1, args.epochs + 1):
+        loss = train_one_epoch(model, train_loader, optimizer, device)
+        accuracy = evaluate(model, test_loader, device)
+        best_accuracy = max(best_accuracy, accuracy)
+        print(
+            f"[train] epoch={epoch:02d}/{args.epochs} "
+            f"loss={loss:.4f} accuracy={accuracy:.4f}"
+        )
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint = {
+        "format_version": 1,
+        "model_state_dict": model.cpu().state_dict(),
+        "classes": CIFAR10_CLASSES,
+        "normalization_mean": CIFAR10_MEAN,
+        "normalization_std": CIFAR10_STD,
+        "epochs": args.epochs,
+        "best_accuracy": best_accuracy,
+        "seed": args.seed,
+    }
+    torch.save(checkpoint, args.out)
+    print(f"[train] wrote {args.out} best_accuracy={best_accuracy:.4f}")
 
 
 if __name__ == "__main__":

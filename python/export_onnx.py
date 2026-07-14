@@ -1,54 +1,58 @@
-"""Stage 2 — Export the trained PyTorch model to ONNX.
-
-Stage 0 skeleton: the export structure is laid out; the actual call is gated
-behind a `NotImplementedError` until Stage 1 produces a real `.pt` checkpoint.
-
-Target usage:
-    python export_onnx.py --weights ../models/cifar10_cnn.pt \
-                          --out     ../models/cifar10_cnn.onnx
-"""
+"""Export a trained v1 checkpoint to the frozen ONNX endpoint contract."""
 
 from __future__ import annotations
 
 import argparse
+import inspect
 from pathlib import Path
 
 import torch
 
-from train import SmallCNN
+from model import load_checkpoint
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def export(weights_path: str, out_path: str, opset: int = 17) -> None:
-    """Load weights into SmallCNN and trace-export to ONNX.
+    """Export dynamic-batch float32 ``input`` to ``logits``."""
 
-    TODO (Stage 2):
-        model = SmallCNN()
-        model.load_state_dict(torch.load(weights_path, map_location="cpu"))
-        model.eval()
-        dummy = torch.randn(1, 3, 32, 32)          # NCHW, batch of 1
-        torch.onnx.export(
-            model, dummy, out_path,
-            input_names=["input"], output_names=["logits"],
-            dynamic_axes={"input": {0: "batch"}, "logits": {0: "batch"}},
-            opset_version=opset,
-        )
-
-    The `dynamic_axes` on dim 0 are what let the C++ side run batched inference
-    later (Stage 5/6) without re-exporting the model.
-    """
-    raise NotImplementedError("Stage 2: implement torch.onnx.export")
+    if opset <= 0:
+        raise ValueError("opset must be positive")
+    model, _ = load_checkpoint(weights_path)
+    output = Path(out_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    dummy = torch.zeros(1, 3, 32, 32, dtype=torch.float32)
+    options = {
+        "export_params": True,
+        "input_names": ["input"],
+        "output_names": ["logits"],
+        "dynamic_axes": {"input": {0: "batch"}, "logits": {0: "batch"}},
+        "opset_version": opset,
+        "do_constant_folding": True,
+    }
+    # The legacy exporter has stable dynamic_axes behavior across the supported
+    # PyTorch versions. Older PyTorch releases do not expose this argument.
+    if "dynamo" in inspect.signature(torch.onnx.export).parameters:
+        options["dynamo"] = False
+    torch.onnx.export(model, dummy, str(output), **options)
+    if not output.is_file() or output.stat().st_size == 0:
+        raise RuntimeError(f"ONNX export did not produce a model: {output}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export PyTorch CNN to ONNX.")
-    parser.add_argument("--weights", default="../models/cifar10_cnn.pt")
-    parser.add_argument("--out", default="../models/cifar10_cnn.onnx")
+    parser.add_argument(
+        "--weights", type=Path, default=REPO_ROOT / "models" / "cifar10_cnn.pt"
+    )
+    parser.add_argument(
+        "--out", type=Path, default=REPO_ROOT / "models" / "cifar10_cnn.onnx"
+    )
     parser.add_argument("--opset", type=int, default=17)
     args = parser.parse_args()
 
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    export(args.weights, args.out, args.opset)
-    print(f"[export] wrote {args.out}")
+    export(str(args.weights), str(args.out), args.opset)
+    print(f"[export] wrote {args.out} (input -> logits, dynamic batch)")
 
 
 if __name__ == "__main__":

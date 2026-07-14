@@ -1,58 +1,96 @@
-"""Stage 2 — Verify PyTorch and ONNX Runtime agree.
-
-This is the *parity gate*: only a model whose ONNX output numerically matches
-PyTorch should cross into the C++ side. Stage 0 skeleton; logic lands in Stage 2.
-
-Target usage:
-    python verify_onnx.py --weights ../models/cifar10_cnn.pt \
-                          --onnx    ../models/cifar10_cnn.onnx
-
-Target output:
-    PyTorch prediction: cat, confidence 0.812
-    ONNX    prediction: cat, confidence 0.812
-    Max output diff:    0.000013   -> PASS (< 1e-4)
-"""
+"""Numerical PyTorch/ONNX Runtime parity gate for the exported model."""
 
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 import torch
 
-from train import CIFAR10_CLASSES, SmallCNN
+from model import CIFAR10_CLASSES, load_checkpoint
 
 
-def verify(weights_path: str, onnx_path: str, tol: float = 1e-4) -> bool:
-    """Run identical input through both runtimes and compare.
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
-    TODO (Stage 2):
-        # PyTorch side
-        model = SmallCNN(); model.load_state_dict(torch.load(weights_path)); model.eval()
-        x = torch.randn(1, 3, 32, 32)
-        with torch.no_grad():
-            torch_logits = model(x).numpy()
 
-        # ONNX Runtime side
-        import onnxruntime as ort
-        sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
-        onnx_logits = sess.run(None, {"input": x.numpy()})[0]
+def verify(
+    weights_path: str,
+    onnx_path: str,
+    tol: float = 1.0e-4,
+    *,
+    seed: int = 1337,
+    batch_size: int = 2,
+) -> bool:
+    """Run deterministic identical inputs and enforce strict max-absolute error."""
 
-        max_diff = float(np.abs(torch_logits - onnx_logits).max())
-        return max_diff < tol
-    """
-    raise NotImplementedError("Stage 2: implement the PyTorch vs ONNX parity check")
+    if not np.isfinite(tol) or tol <= 0.0:
+        raise ValueError("tol must be a positive finite number")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    model_path = Path(onnx_path)
+    if not model_path.is_file():
+        raise FileNotFoundError(f"ONNX model does not exist: {model_path}")
+
+    import onnxruntime as ort
+
+    model, _ = load_checkpoint(weights_path)
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    inputs = torch.randn(
+        batch_size, 3, 32, 32, generator=generator, dtype=torch.float32
+    )
+    with torch.no_grad():
+        torch_logits = model(inputs).cpu().numpy()
+
+    session = ort.InferenceSession(
+        str(model_path), providers=["CPUExecutionProvider"]
+    )
+    if len(session.get_inputs()) != 1 or session.get_inputs()[0].name != "input":
+        raise ValueError("ONNX model must expose exactly one input named 'input'")
+    if len(session.get_outputs()) < 1 or session.get_outputs()[0].name != "logits":
+        raise ValueError("ONNX model must expose a first output named 'logits'")
+    onnx_logits = session.run(["logits"], {"input": inputs.numpy()})[0]
+    if onnx_logits.shape != torch_logits.shape:
+        raise ValueError(
+            f"output shape mismatch: PyTorch {torch_logits.shape}, ONNX {onnx_logits.shape}"
+        )
+    if not np.isfinite(onnx_logits).all():
+        raise ValueError("ONNX Runtime produced non-finite logits")
+
+    max_diff = float(np.max(np.abs(torch_logits - onnx_logits)))
+    torch_classes = np.argmax(torch_logits, axis=1)
+    onnx_classes = np.argmax(onnx_logits, axis=1)
+    class_match = bool(np.array_equal(torch_classes, onnx_classes))
+    passed = max_diff < tol and class_match
+    print(
+        f"[verify] seed={seed} batch={batch_size} max_abs_diff={max_diff:.8g} "
+        f"tolerance={tol:.8g} class_match={class_match} "
+        f"result={'PASS' if passed else 'FAIL'}"
+    )
+    return passed
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check PyTorch/ONNX parity.")
-    parser.add_argument("--weights", default="../models/cifar10_cnn.pt")
-    parser.add_argument("--onnx", default="../models/cifar10_cnn.onnx")
-    parser.add_argument("--tol", type=float, default=1e-4)
+    parser.add_argument(
+        "--weights", type=Path, default=REPO_ROOT / "models" / "cifar10_cnn.pt"
+    )
+    parser.add_argument(
+        "--onnx", type=Path, default=REPO_ROOT / "models" / "cifar10_cnn.onnx"
+    )
+    parser.add_argument("--tol", type=float, default=1.0e-4)
+    parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--batch-size", type=int, default=2)
     args = parser.parse_args()
 
-    ok = verify(args.weights, args.onnx, args.tol)
-    print(f"[verify] classes={len(CIFAR10_CLASSES)}  parity={'PASS' if ok else 'FAIL'}")
+    ok = verify(
+        str(args.weights),
+        str(args.onnx),
+        args.tol,
+        seed=args.seed,
+        batch_size=args.batch_size,
+    )
+    print(f"[verify] classes={len(CIFAR10_CLASSES)} parity={'PASS' if ok else 'FAIL'}")
     raise SystemExit(0 if ok else 1)
 
 
