@@ -60,8 +60,9 @@ checkpoints.
 
 | ID | Decision | Alternatives considered | Why | How | Consequences and revisit trigger | State |
 |---|---|---|---|---|---|---|
-| D-34 | Merge PR #1 only after every check on its latest head passes, using a normal merge commit. | Merge while checks are pending; squash; GitHub rebase; push directly to `main`. | The repository has no enforcing branch rule, while evidence cites the exact v1.0, v1.1, candidate, and rollback commits. A manual green-head gate protects `main`; a normal merge preserves that provenance. | Reconcile PR metadata and current-status docs, confirm no unresolved review threads or conflicts, wait for all seven workflow jobs on the final head SHA, then merge without bypassing checks. | History intentionally retains the rejected candidate and revert. Enforcement is procedural until a separately approved branch ruleset exists; revisit protection before accepting outside contributors. | Accepted at C9 |
-| D-35 | Make the bare Ubuntu minimum-CMake bootstrap explicit, noninteractive, deterministic in timezone, and bounded to 15 minutes. | Retry blocked runs; remove the job; answer prompts manually; rely on undeclared image tools; permit the default six-hour timeout. | Installing the compiler pulled in `tzdata`, whose prompt blocked an unattended runner. After that was exposed, CMake correctly reported that the bare image had no build program. CI setup must declare every tool and fail or finish without human input. | Set job-level `DEBIAN_FRONTEND=noninteractive` and `TZ=Etc/UTC`; explicitly install CMake, the C++ compiler, Make, Git, and certificates; verify their versions; retain the Ubuntu 20.04/CMake 3.16 source; and add `timeout-minutes: 15`. | The job now fails within a bounded window if package setup or an explicit tool regresses. Revisit the base image before Ubuntu 20.04 package availability becomes unreliable. | Accepted at C9; validation required on final PR head |
+| D-34 | Merge PR #1 only after every check on its latest head passes, using a normal merge commit. | Merge while checks are pending; squash; GitHub rebase; push directly to `main`. | The repository has no enforcing branch rule, while evidence cites the exact v1.0, v1.1, candidate, and rollback commits. A manual green-head gate protects `main`; a normal merge preserves that provenance. | Reconcile PR metadata and current-status docs, confirm no unresolved review threads or conflicts, wait for all seven workflow jobs on the final head SHA, then merge without bypassing checks. | History intentionally retains the rejected candidate and revert. Enforcement is procedural until a separately approved branch ruleset exists; revisit protection before accepting outside contributors. | Validated at C9 |
+| D-35 | Make the bare Ubuntu minimum-CMake bootstrap explicit, noninteractive, deterministic in timezone, and bounded to 15 minutes. | Retry blocked runs; remove the job; answer prompts manually; rely on undeclared image tools; permit the default six-hour timeout. | Installing the compiler pulled in `tzdata`, whose prompt blocked an unattended runner. After that was exposed, CMake correctly reported that the bare image had no build program. CI setup must declare every tool and fail or finish without human input. | Set job-level `DEBIAN_FRONTEND=noninteractive` and `TZ=Etc/UTC`; explicitly install CMake, the C++ compiler, Make, Git, and certificates; verify their versions; retain the Ubuntu 20.04/CMake 3.16 source; and add `timeout-minutes: 15`. | The job now fails within a bounded window if package setup or an explicit tool regresses. Revisit the base image before Ubuntu 20.04 package availability becomes unreliable. | Validated at C9 on the final PR head and merge commit |
+| D-36 | Use only evidence-backed README credibility signals: one live default-branch CI badge, a portable quickstart before local metrics, and explicit public-versus-local evidence boundaries. | Add a badge wall; lead with unpublished model claims; call v1.1 a GitHub release; imply licensing or production readiness; hide negative results and missing governance. | GitHub currently exposes successful CI but no remote version tag, Release, detected license, or community-health policy beyond the README. Credibility requires clickable proof and adjacent limitations, not labels that outrun repository state. | Scope the badge to `main` push runs; show the dependency-free C++ proof first; separate GitHub CI from maintainer-local scientific evidence; preserve the v1.2 candidate/revert links; identify help and maintenance; state the absent license without choosing one for the owner. | The landing page becomes easier to verify but cannot substitute for LICENSE, CONTRIBUTING, SECURITY, a protected branch, repository metadata, remote tags, or published evidence. Add those only through separately authorized governance/release decisions. | Validated at C10 |
 
 ## Introspection checkpoints
 
@@ -471,7 +472,7 @@ the one official D-33 invocation.
 **Result:** no v1.2 release or batching claim is made. Another batch size, threading policy, buffer
 reuse design, or optimization requires a new decision before implementation or measurement.
 
-### C9 — pull-request merge-readiness checkpoint (2026-07-15, active)
+### C9 — pull-request merge-readiness checkpoint (2026-07-15, completed)
 
 **Why and how**
 
@@ -487,8 +488,32 @@ reuse design, or optimization requires a new decision before implementation or m
 - PR scope, verification evidence, and the negative v1.2 result are recorded in its description.
   Live check state remains on GitHub rather than being frozen into a self-invalidating source claim.
 
-**Result:** documentation and merge policy are reconciled. PR #1 remains gated on successful CI for
-its final head before it may leave draft state and merge into `main`.
+**Result:** final PR head `5bc1093` passed all seven jobs, PR #1 merged through normal merge commit
+`13c22d1`, and all seven jobs passed again on that exact `main` commit. The feature branch was then
+deleted locally and remotely.
+
+### C10 — README credibility checkpoint (2026-07-15, completed)
+
+**Why and how**
+
+- Official GitHub guidance was used to prioritize what the project does, why it is useful, a fast
+  getting-started path, help, and maintenance. GitHub's repository API and community profile were
+  treated as sources of truth for public metadata rather than inferring governance from visibility.
+- The README now has one dynamic CI badge scoped to `main` push runs. Static version, coverage,
+  license, release, download, security, and best-practice badges were rejected because no matching
+  published source of truth exists.
+- The portable C++ path moved above model metrics and was reproduced from a clean build directory:
+  configure/build passed, the portable label passed 3/3, and the preprocessing benchmark ran.
+- All 22 Markdown links/images were checked; every relative target exists and each external link
+  used by the badge, commits, issues, maintainer, and ONNX Runtime returned HTTP 200.
+- Local 79.90% accuracy, parity, and benchmark observations remain visible but are explicitly
+  labelled maintainer-local because their checksummed model/evidence bundle is not published.
+- The absence of a remote release/tag, license, contribution guide, security policy, templates,
+  branch protection, repository description, and topics remains visible follow-up work rather than
+  being papered over with README claims.
+
+**Result:** D-36 passes. The README presents runnable public proof first, preserves scientifically
+useful local evidence and the negative v1.2 result, and states what the repository cannot yet prove.
 
 ## How to update this record
 
