@@ -46,7 +46,11 @@ jobs:
   minimum-cmake:
     name: CMake 3.16 compatibility
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container: ubuntu:20.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      TZ: Etc/UTC
     steps:
       - name: Install minimum toolchain
         run: apt-get update && apt-get install -y --no-install-recommends cmake g++ git ca-certificates
