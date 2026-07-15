@@ -24,16 +24,20 @@ def save_linear_model(
     output_shape=("batch", 10),
     actual_classes: int = 10,
     extra_output: bool = False,
+    row_sensitive: bool = False,
 ) -> None:
     fixed_input_elements = 1
     for dimension, fallback in zip(input_shape[1:], (3, 32, 32)):
         fixed_input_elements *= dimension if isinstance(dimension, int) else fallback
 
     numpy_dtype = np.float64 if input_type == TensorProto.DOUBLE else np.float32
-    weights = numpy_helper.from_array(
-        np.zeros((fixed_input_elements, actual_classes), dtype=numpy_dtype),
-        name="weights",
+    weight_values = np.zeros(
+        (fixed_input_elements, actual_classes), dtype=numpy_dtype
     )
+    if row_sensitive:
+        diagonal = min(fixed_input_elements, actual_classes)
+        weight_values[np.arange(diagonal), np.arange(diagonal)] = 1.0
+    weights = numpy_helper.from_array(weight_values, name="weights")
     nodes = [
         helper.make_node("Flatten", [input_name], ["flattened"], axis=1),
         helper.make_node("MatMul", ["flattened", "weights"], [output_name]),
@@ -98,7 +102,9 @@ def save_dynamic_class_model(path: Path, declared_shape=(1, "classes")) -> None:
     onnx.save(model, path)
 
 
-def save_runtime_batch_mismatch_model(path: Path) -> None:
+def save_runtime_batch_mismatch_model(
+    path: Path, input_shape=("batch", 3, 32, 32)
+) -> None:
     pads = numpy_helper.from_array(
         np.array([0, 0, 0, 6], dtype=np.int64), name="pads"
     )
@@ -115,9 +121,45 @@ def save_runtime_batch_mismatch_model(path: Path) -> None:
             ),
         ],
         path.stem,
-        [helper.make_tensor_value_info("input", TensorProto.FLOAT, ["batch", 3, 32, 32])],
+        [helper.make_tensor_value_info("input", TensorProto.FLOAT, list(input_shape))],
         [helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["batch", 10])],
         initializer=[pads, pad_value],
+    )
+    model = helper.make_model(
+        graph,
+        producer_name="cpp-ml-inference-lab-tests",
+        opset_imports=[helper.make_operatorsetid("", OPSET)],
+    )
+    model.ir_version = IR_VERSION
+    onnx.checker.check_model(model)
+    onnx.save(model, path)
+
+
+def save_runtime_class_mismatch_model(path: Path) -> None:
+    """Declare [N,10] while producing [N,9] through a runtime shape value."""
+    initializers = [
+        numpy_helper.from_array(np.array(0, dtype=np.int64), name="batch_index"),
+        numpy_helper.from_array(np.array([0], dtype=np.int64), name="axes"),
+        numpy_helper.from_array(np.array([9], dtype=np.int64), name="nine_classes"),
+    ]
+    graph = helper.make_graph(
+        [
+            helper.make_node("Shape", ["input"], ["input_shape"]),
+            helper.make_node(
+                "Gather", ["input_shape", "batch_index"], ["batch_size"], axis=0
+            ),
+            helper.make_node(
+                "Unsqueeze", ["batch_size", "axes"], ["batch_vector"]
+            ),
+            helper.make_node(
+                "Concat", ["batch_vector", "nine_classes"], ["actual_shape"], axis=0
+            ),
+            helper.make_node("ConstantOfShape", ["actual_shape"], ["logits"]),
+        ],
+        path.stem,
+        [helper.make_tensor_value_info("input", TensorProto.FLOAT, ["batch", 3, 32, 32])],
+        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["batch", 10])],
+        initializer=initializers,
     )
     model = helper.make_model(
         graph,
@@ -161,7 +203,25 @@ def generate(output_dir: Path) -> None:
     for stale_fixture in output_dir.glob("*.onnx"):
         stale_fixture.unlink()
 
-    save_linear_model(output_dir / "valid.onnx")
+    save_linear_model(output_dir / "valid.onnx", row_sensitive=True)
+    save_linear_model(
+        output_dir / "row_identity_dynamic_batch.onnx", row_sensitive=True
+    )
+    save_linear_model(
+        output_dir / "fixed_batch_one.onnx",
+        input_shape=(1, 3, 32, 32),
+        output_shape=(1, 10),
+        row_sensitive=True,
+    )
+    save_linear_model(
+        output_dir / "mixed_dynamic_input_fixed_output.onnx",
+        input_shape=("batch", 3, 32, 32),
+        output_shape=(1, 10),
+    )
+    save_runtime_batch_mismatch_model(
+        output_dir / "mixed_fixed_input_dynamic_output.onnx",
+        input_shape=(1, 3, 32, 32),
+    )
     save_linear_model(output_dir / "wrong_input_name.onnx", input_name="features")
     save_linear_model(output_dir / "wrong_output_name.onnx", output_name="scores")
     save_linear_model(
@@ -213,14 +273,12 @@ def generate(output_dir: Path) -> None:
     )
     save_dynamic_class_model(output_dir / "dynamic_classes.onnx")
     save_runtime_batch_mismatch_model(output_dir / "runtime_batch_mismatch.onnx")
-    save_dynamic_class_model(
-        output_dir / "runtime_class_mismatch.onnx", declared_shape=(1, 10)
-    )
+    save_runtime_class_mismatch_model(output_dir / "runtime_class_mismatch.onnx")
     (output_dir / "corrupt.onnx").write_bytes(b"not-an-onnx-model\x00\xff")
 
     generated = sorted(path.name for path in output_dir.glob("*.onnx"))
-    if len(generated) != 20:
-        raise RuntimeError(f"expected 20 ONNX fixtures, generated {len(generated)}")
+    if len(generated) != 24:
+        raise RuntimeError(f"expected 24 ONNX fixtures, generated {len(generated)}")
     print(f"generated {len(generated)} deterministic ONNX fixtures in {output_dir}")
     for name in generated:
         print(name)

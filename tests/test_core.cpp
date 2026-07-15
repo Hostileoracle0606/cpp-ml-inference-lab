@@ -52,6 +52,25 @@ float normalized(std::uint8_t value, std::size_t channel) {
            Cifar10Preprocessor::kStd[channel];
 }
 
+ModelOutput model_output(std::vector<float> logits,
+                         std::vector<std::int64_t> shape,
+                         double inference_ms = 0.0) {
+    ModelOutput output;
+    output.logits = std::move(logits);
+    output.inference_ms = inference_ms;
+    output.shape = std::move(shape);
+    return output;
+}
+
+Tensor runtime_tensor(std::int64_t batch_size) {
+    Tensor tensor;
+    tensor.shape = {batch_size, 3, 32, 32};
+    if (batch_size > 0 && batch_size <= 256) {
+        tensor.values.resize(static_cast<std::size_t>(batch_size) * 3U * 32U * 32U);
+    }
+    return tensor;
+}
+
 class TemporaryFile final {
 public:
     explicit TemporaryFile(std::string suffix)
@@ -113,6 +132,35 @@ TEST_CASE(image_and_tensor_values_validate_their_invariants) {
 
     Tensor invalid_dimension{{1, 3, -1, 2}, {}};
     EXPECT_THROW(invalid_dimension.validate(), std::invalid_argument);
+
+    Tensor zero_batch{{0, 3, 32, 32}, {}};
+    EXPECT_THROW(zero_batch.validate(), std::invalid_argument);
+
+    Tensor overflowing{{std::numeric_limits<std::int64_t>::max(), 3, 32, 32}, {}};
+    EXPECT_THROW(overflowing.element_count(), std::invalid_argument);
+}
+
+TEST_CASE(model_output_validates_shape_count_finiteness_and_overflow) {
+    ModelOutput batch_output = model_output(std::vector<float>(80, 0.5F), {8, 10}, 1.25);
+    EXPECT_EQ(batch_output.element_count(), std::size_t{80});
+    batch_output.validate();
+
+    ModelOutput empty_shape = model_output({1.0F}, {});
+    EXPECT_THROW(empty_shape.validate(), std::invalid_argument);
+
+    ModelOutput zero_dimension = model_output({}, {0, 10});
+    EXPECT_THROW(zero_dimension.validate(), std::invalid_argument);
+
+    ModelOutput wrong_count = model_output(std::vector<float>(79, 0.0F), {8, 10});
+    EXPECT_THROW(wrong_count.validate(), std::invalid_argument);
+
+    ModelOutput non_finite = model_output(
+        {std::numeric_limits<float>::quiet_NaN()}, {1, 1});
+    EXPECT_THROW(non_finite.validate(), std::invalid_argument);
+
+    ModelOutput overflowing = model_output(
+        {}, {std::numeric_limits<std::int64_t>::max(), 3});
+    EXPECT_THROW(overflowing.element_count(), std::invalid_argument);
 }
 
 TEST_CASE(preprocessor_preserves_contract_shape_and_hwc_to_chw_channel_order) {
@@ -282,10 +330,11 @@ TEST_CASE(ppm_loader_rejects_missing_or_unsupported_inputs) {
 
 TEST_CASE(inference_engine_reuses_its_injected_backend) {
     auto state = std::make_shared<BackendState>();
-    ModelOutput output{{0.0F, 1.0F}, 4.25};
+    ModelOutput output = model_output(std::vector<float>(10, 1.0F), {1, 10}, 4.25);
     InferenceEngine engine(
         std::make_unique<RecordingBackend>(state, output));
-    const Tensor input{{1, 1}, {42.0F}};
+    Tensor input = runtime_tensor(1);
+    input.values.front() = 42.0F;
 
     const ModelOutput first = engine.infer(input);
     const ModelOutput second = engine.infer(input);
@@ -299,33 +348,72 @@ TEST_CASE(inference_engine_reuses_its_injected_backend) {
 TEST_CASE(inference_engine_rejects_invalid_input_and_backend_results) {
     EXPECT_THROW(InferenceEngine(nullptr), std::invalid_argument);
 
+    const Tensor valid_input = runtime_tensor(1);
+
     auto input_state = std::make_shared<BackendState>();
     InferenceEngine input_engine(std::make_unique<RecordingBackend>(
-        input_state, ModelOutput{{1.0F}, 0.0}));
+        input_state, model_output(std::vector<float>(10, 1.0F), {1, 10})));
     EXPECT_THROW(input_engine.infer(Tensor{{1, 2}, {1.0F}}), std::invalid_argument);
+    EXPECT_THROW(input_engine.infer(runtime_tensor(-1)), std::invalid_argument);
+    EXPECT_THROW(input_engine.infer(runtime_tensor(0)), std::invalid_argument);
+    EXPECT_THROW(input_engine.infer(Tensor{{257, 3, 32, 32}, {}}), std::invalid_argument);
     EXPECT_EQ(input_state->calls, std::size_t{0});
 
     auto empty_state = std::make_shared<BackendState>();
     InferenceEngine empty_engine(std::make_unique<RecordingBackend>(
-        empty_state, ModelOutput{{}, 0.0}));
-    EXPECT_THROW(empty_engine.infer(Tensor{{1}, {1.0F}}), std::runtime_error);
+        empty_state, model_output({}, {1, 10})));
+    EXPECT_THROW(empty_engine.infer(valid_input), std::runtime_error);
 
     auto timing_state = std::make_shared<BackendState>();
     InferenceEngine timing_engine(std::make_unique<RecordingBackend>(
-        timing_state, ModelOutput{{1.0F}, -0.01}));
-    EXPECT_THROW(timing_engine.infer(Tensor{{1}, {1.0F}}), std::runtime_error);
+        timing_state, model_output(std::vector<float>(10, 1.0F), {1, 10}, -0.01)));
+    EXPECT_THROW(timing_engine.infer(valid_input), std::runtime_error);
 
     auto infinite_state = std::make_shared<BackendState>();
     InferenceEngine infinite_engine(std::make_unique<RecordingBackend>(
         infinite_state,
-        ModelOutput{{1.0F}, std::numeric_limits<double>::infinity()}));
-    EXPECT_THROW(infinite_engine.infer(Tensor{{1}, {1.0F}}), std::runtime_error);
+        model_output(std::vector<float>(10, 1.0F), {1, 10},
+                     std::numeric_limits<double>::infinity())));
+    EXPECT_THROW(infinite_engine.infer(valid_input), std::runtime_error);
 
     auto nan_state = std::make_shared<BackendState>();
     InferenceEngine nan_engine(std::make_unique<RecordingBackend>(
         nan_state,
-        ModelOutput{{1.0F}, std::numeric_limits<double>::quiet_NaN()}));
-    EXPECT_THROW(nan_engine.infer(Tensor{{1}, {1.0F}}), std::runtime_error);
+        model_output(std::vector<float>(10, 1.0F), {1, 10},
+                     std::numeric_limits<double>::quiet_NaN())));
+    EXPECT_THROW(nan_engine.infer(valid_input), std::runtime_error);
+
+    auto logit_state = std::make_shared<BackendState>();
+    auto non_finite_logits = std::vector<float>(10, 1.0F);
+    non_finite_logits[4] = std::numeric_limits<float>::quiet_NaN();
+    InferenceEngine logit_engine(std::make_unique<RecordingBackend>(
+        logit_state, model_output(std::move(non_finite_logits), {1, 10})));
+    EXPECT_THROW(logit_engine.infer(valid_input), std::runtime_error);
+
+    auto shape_state = std::make_shared<BackendState>();
+    InferenceEngine shape_engine(std::make_unique<RecordingBackend>(
+        shape_state, model_output(std::vector<float>(9, 1.0F), {1, 9})));
+    EXPECT_THROW(shape_engine.infer(valid_input), std::runtime_error);
+}
+
+TEST_CASE(inference_engine_preserves_valid_batch_shape_and_row_major_logits) {
+    auto state = std::make_shared<BackendState>();
+    std::vector<float> logits(80);
+    for (std::size_t row = 0; row < 8; ++row) {
+        for (std::size_t column = 0; column < 10; ++column) {
+            logits[row * 10 + column] = static_cast<float>(row * 100 + column);
+        }
+    }
+    InferenceEngine engine(std::make_unique<RecordingBackend>(
+        state, model_output(logits, {8, 10}, 2.0)));
+
+    const ModelOutput output = engine.infer(runtime_tensor(8));
+    EXPECT_EQ(state->calls, std::size_t{1});
+    EXPECT_EQ(output.shape, (std::vector<std::int64_t>{8, 10}));
+    EXPECT_EQ(output.logits.size(), std::size_t{80});
+    EXPECT_NEAR(output.logits[0], 0.0F, kTolerance);
+    EXPECT_NEAR(output.logits[17], 107.0F, kTolerance);
+    EXPECT_NEAR(output.logits[79], 709.0F, kTolerance);
 }
 
 TEST_CASE(pipeline_orchestrates_preprocessing_inference_and_decoding) {
@@ -334,6 +422,7 @@ TEST_CASE(pipeline_orchestrates_preprocessing_inference_and_decoding) {
     output.logits = {0.0F, 0.0F, 0.0F, 8.0F, 0.0F,
                      0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
     output.inference_ms = 0.0;
+    output.shape = {1, 10};
     InferencePipeline pipeline(InferenceEngine(
         std::make_unique<RecordingBackend>(state, std::move(output))));
 

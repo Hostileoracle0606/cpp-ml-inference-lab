@@ -118,8 +118,15 @@ export metadata, and parity.
 ## Runtime validation and RAII
 
 `OnnxRuntimeBackend` creates its environment and session once. Construction rejects a missing
-model, incorrect endpoint count/name, non-float types, or incompatible rank/dimensions. Each run
-then enforces the concrete batch-one input and `[1,10]` output expected by the CLI.
+model, incorrect endpoint count/name, non-float types, incompatible rank/dimensions, fixed batch
+sizes other than one, and mixed fixed/dynamic input-output batch axes. A dynamic graph may execute
+validated `[N,3,32,32] -> [N,10]` runtime tensors for `1 <= N <= 256`; a fixed-batch-one graph may
+execute only `N=1`. The single-image CLI and pipeline still supply `[1,3,32,32]` and decode one row.
+
+`ModelOutput` owns both row-major logits and their runtime shape. `InferenceEngine` revalidates the
+shape, buffer length, finite values, duration, and input/output batch agreement after every backend
+call. This keeps a malformed custom backend from bypassing the same contract enforced at the ONNX
+edge.
 
 ONNX Runtime's `GetTensorTypeAndShapeInfo()` on a session type returns an unowned view. V1 keeps
 the owning `Ort::TypeInfo` local alive while reading that view. A real-runtime checkpoint caught

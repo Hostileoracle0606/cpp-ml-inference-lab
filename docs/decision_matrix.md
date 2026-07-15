@@ -53,7 +53,8 @@ checkpoints.
 
 | ID | Decision | Alternatives considered | Why | How | Consequences and revisit trigger | State |
 |---|---|---|---|---|---|---|
-| D-32 | Limit v1.2 to a measured runtime-only batch-eight experiment; keep preprocessing, decoding, pipeline, and CLI batch-one. | Add public batch APIs across every layer; build a request queue/server; tune several batch sizes and select the best; skip batching. | The dynamic ONNX graph creates a concrete runtime hypothesis, but no multi-image consumer yet defines public ordering, timing, partial-failure, cancellation, or backpressure semantics. | Add validated `ModelOutput` shape, permit capped `[N,3,32,32] -> [N,10]` runtime execution, and compare one batch-eight call with eight serial batch-one calls over identical prepared tensors. Pre-register a 50% median items/s improvement, 8/10 favorable paired runs, no group-p95 regression, and full correctness gates before implementation. | V1.2 will not expose batching to application callers even if the runtime experiment passes. Revisit public batch APIs only with a concrete CLI/server consumer; another batch size or optimization needs a new decision before measurement. | Accepted pre-v1.2 |
+| D-32 | Limit v1.2 to a measured runtime-only batch-eight experiment; keep preprocessing, decoding, pipeline, and CLI batch-one. | Add public batch APIs across every layer; build a request queue/server; tune several batch sizes and select the best; skip batching. | The dynamic ONNX graph creates a concrete runtime hypothesis, but no multi-image consumer yet defines public ordering, timing, partial-failure, cancellation, or backpressure semantics. | Add validated `ModelOutput` shape, permit capped `[N,3,32,32] -> [N,10]` runtime execution, and compare one batch-eight call with eight serial batch-one calls over identical prepared tensors. Pre-register a 50% median items/s improvement, 8/10 favorable paired runs, no group-p95 regression, and full correctness gates before implementation. | V1.2 will not expose batching to application callers even if the runtime experiment passes. Revisit public batch APIs only with a concrete CLI/server consumer; another batch size or optimization needs a new decision before measurement. | Implemented and correctness-validated at C7; performance pending |
+| D-33 | Freeze the v1.2 paired sampling recipe before its first performance run. | Choose sample counts after observing variance; compare separate binaries/sessions; retain only summary statistics. | D-32 fixed the acceptance thresholds but left sample counts and tail aggregation underspecified, which could permit accidental post-result tuning. | In each of ten fresh processes, use one persistent session and eight prepared rows whose pixel at flat index `i` in zero-based row `r` is `(i*37 + r*17) % 256`. Use 20 warm-up workloads per mode and 200 measured eight-item workloads per mode. Odd runs execute serial then batch; even runs reverse the order. Retain all 2,000 group-latency samples per mode. Per-run items/s is `1600 / sum(group_ms) * 1000`; the paired ratio is batch items/s divided by serial items/s. Sort the ten ratios and average the fifth and sixth for the median. Count ratios above one for stability. Compare nearest-rank p95 across each mode's combined 2,000 group samples. | The experiment is intentionally narrow and machine-scoped. A failed/crashed/malformed run aborts the experiment and is not selectively replaced. Any different counts, input recipe, session policy, aggregation rule, or rerun after inspecting results requires a new decision and cannot replace this result silently. | Accepted pre-measurement |
 
 ## Introspection checkpoints
 
@@ -408,6 +409,43 @@ G advances to C6 source/version/claim reconciliation.
 
 **Result:** Gates A–G pass in their stated scopes. V1.1 is ready as a source release with
 reproducible local reference-model evidence, not as a binary-model distribution.
+
+### C7 — v1.2 pre-measurement source checkpoint (2026-07-15, completed)
+
+**Small runtime-only change**
+
+- `ModelOutput` now carries and validates its runtime shape, logit count/finiteness, and measured
+  duration. `InferenceEngine` accepts only capped CIFAR-10 `[N,3,32,32]` input and requires matching
+  `[N,10]` output for `1 <= N <= 256`.
+- The existing `IInferenceBackend::run(const Tensor&) -> ModelOutput` seam did not change. The ONNX
+  adapter accepts coupled dynamic batch axes, preserves fixed-batch-one compatibility, rejects
+  mixed axes and other fixed batches at construction, and rejects runtime shape disagreement.
+- Preprocessing, decoding, pipeline, and CLI remain batch-one. No new hierarchy, public batch API,
+  queue, server, threading policy, or runtime tuning was introduced.
+
+**Correctness and experiment controls**
+
+- Fresh native checks passed 5/5 default Release tests, 3/3 AppleClang ASan/UBSan portable tests
+  with leak detection disabled, and 13/13 dependency-required trained-model ORT/Python tests. The
+  Python pipeline suite remained 18/18 and the experiment orchestrator/aggregator passed 6/6 unit
+  tests, including ten-run success and first-failure abort paths.
+  Official CMake 3.16.8 built x86_64 outputs under Rosetta and passed 3/3 portable tests.
+- Generated fixtures cover dynamic batches 1/8/256, zero/257 limits, fixed batch one, fixed batch
+  two rejection, both mixed-axis directions, runtime batch/class disagreement, and deterministic
+  row order. The r2 trained graph's batch-eight output matches eight single calls within `1e-5`
+  with identical classes.
+- Trained PyTorch-to-ORT batch-eight parity is `2.6226044e-06 < 1e-4` with matching classes. The
+  v1.1 lightweight bundle verifier and deep semantic audit remain green.
+- `run_batch_experiment.py` requires a clean committed source tree, verifies the full frozen ONNX
+  and ORT 1.19.2 library SHA-256 values plus benchmark linkage and reference-machine build scope,
+  records the source and benchmark-binary hashes, creates a new output directory, launches runs 1
+  through 10 once, retains all raw samples/logs, aborts without selective replacement, and applies
+  D-33's conventional median and pooled nearest-rank p95 rules. Its aggregation contract has
+  independent unit coverage.
+
+**Result:** D-32 is implemented and all correctness prerequisites pass. No official trained-model
+paired performance process has run. The next event is a clean candidate commit/build followed by
+the one D-33 experiment; the measured outcome, positive or negative, advances to C8.
 
 ## How to update this record
 

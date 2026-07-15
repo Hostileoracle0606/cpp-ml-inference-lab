@@ -27,6 +27,10 @@ struct Tensor {
 struct ModelOutput {
     std::vector<float> logits;
     double inference_ms = 0.0;
+    std::vector<std::int64_t> shape;
+
+    [[nodiscard]] std::size_t element_count() const;
+    void validate() const;
 };
 
 struct Prediction {

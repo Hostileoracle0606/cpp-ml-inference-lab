@@ -70,6 +70,18 @@ endif()
 
 set(CPP_ML_TEST_MODEL "" CACHE FILEPATH
     "Optional ONNX model used by the ONNX Runtime end-to-end CTest")
+if(WITH_ONNXRUNTIME)
+    add_executable(cpp_ml_batch_ort_tests test_batch_ort.cpp)
+    target_link_libraries(cpp_ml_batch_ort_tests PRIVATE cpp_ml_core)
+    target_compile_features(cpp_ml_batch_ort_tests PRIVATE cxx_std_17)
+    if(MSVC)
+        target_compile_options(cpp_ml_batch_ort_tests PRIVATE /W4 /WX)
+    else()
+        target_compile_options(cpp_ml_batch_ort_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Werror)
+    endif()
+endif()
+
 if(WITH_ONNXRUNTIME AND TARGET inference_benchmark AND
    CPP_ML_PYTHON_FULL_AVAILABLE)
     set(CPP_ML_ONNX_FIXTURE_DIRECTORY
@@ -108,6 +120,27 @@ if(WITH_ONNXRUNTIME AND TARGET inference_benchmark AND
         FIXTURES_REQUIRED cpp_ml_onnx_fixtures
         LABELS "integration;negative;onnxruntime"
         TIMEOUT 120)
+
+    add_test(
+        NAME cpp_ml_ort_batch_generated_contract
+        COMMAND $<TARGET_FILE:cpp_ml_batch_ort_tests>
+            --fixtures ${CPP_ML_ONNX_FIXTURE_DIRECTORY})
+    set_tests_properties(cpp_ml_ort_batch_generated_contract PROPERTIES
+        FIXTURES_REQUIRED cpp_ml_onnx_fixtures
+        LABELS "batch;integration;negative;onnxruntime"
+        TIMEOUT 120)
+
+    add_test(
+        NAME cpp_ml_batch_benchmark_record_contract
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_batch_benchmark_record.py
+            --benchmark $<TARGET_FILE:inference_benchmark>
+            --model ${CPP_ML_ONNX_FIXTURE_DIRECTORY}/valid.onnx
+            --work-dir ${CMAKE_CURRENT_BINARY_DIR}/paired_benchmark_contract)
+    set_tests_properties(cpp_ml_batch_benchmark_record_contract PROPERTIES
+        FIXTURES_REQUIRED cpp_ml_onnx_fixtures
+        LABELS "batch;benchmark;integration;onnxruntime"
+        TIMEOUT 120)
 endif()
 
 if(WITH_ONNXRUNTIME AND TARGET inference_benchmark AND CPP_ML_TEST_MODEL)
@@ -126,6 +159,14 @@ if(WITH_ONNXRUNTIME AND TARGET inference_benchmark AND CPP_ML_TEST_MODEL)
     set_tests_properties(cpp_ml_ort_external_e2e_contract PROPERTIES
         LABELS "e2e;onnxruntime"
         TIMEOUT 120)
+
+    add_test(
+        NAME cpp_ml_ort_batch_trained_contract
+        COMMAND $<TARGET_FILE:cpp_ml_batch_ort_tests>
+            --trained-model ${CPP_ML_TEST_MODEL})
+    set_tests_properties(cpp_ml_ort_batch_trained_contract PROPERTIES
+        LABELS "batch;e2e;numerical-parity;onnxruntime"
+        TIMEOUT 120)
 endif()
 
 if(Python3_Interpreter_FOUND)
@@ -135,4 +176,12 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(python_pipeline_smoke PROPERTIES
         LABELS "python;smoke"
         TIMEOUT 120)
+
+    add_test(
+        NAME python_batch_experiment_contract
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_batch_experiment.py)
+    set_tests_properties(python_batch_experiment_contract PROPERTIES
+        LABELS "batch;benchmark;python;unit"
+        TIMEOUT 30)
 endif()
