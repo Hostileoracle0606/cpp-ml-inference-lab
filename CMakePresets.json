@@ -1,0 +1,64 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Portable Release",
+      "binaryDir": "${sourceDir}/build/preset-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON",
+        "BUILD_BENCHMARKS": "ON"
+      }
+    },
+    {
+      "name": "release-full-python",
+      "displayName": "Release with required Python dependencies",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/preset-release-full-python",
+      "cacheVariables": {
+        "CPP_ML_REQUIRE_PYTHON_DEPS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "release-full-python",
+      "configurePreset": "release-full-python",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "portable",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "filter": {
+        "include": {
+          "label": "portable"
+        }
+      }
+    },
+    {
+      "name": "release-full-python",
+      "configurePreset": "release-full-python",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

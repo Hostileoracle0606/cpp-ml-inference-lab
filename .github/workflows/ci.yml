@@ -1,0 +1,126 @@
+name: portability-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC Release
+            os: ubuntu-latest
+            compiler_args: -DCMAKE_CXX_COMPILER=g++
+          - name: Linux Clang Release
+            os: ubuntu-latest
+            compiler_args: -DCMAKE_CXX_COMPILER=clang++
+          - name: macOS AppleClang Release
+            os: macos-latest
+            compiler_args: ""
+          - name: Windows MSVC Release
+            os: windows-latest
+            compiler_args: ""
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        shell: bash
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
+          -DBUILD_BENCHMARKS=ON
+          ${{ matrix.compiler_args }}
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Portable tests
+        run: ctest --test-dir build -C Release --output-on-failure -L portable
+
+  minimum-cmake:
+    name: CMake 3.16 compatibility
+    runs-on: ubuntu-latest
+    container: ubuntu:20.04
+    steps:
+      - name: Install minimum toolchain
+        run: apt-get update && apt-get install -y --no-install-recommends cmake g++ git ca-certificates
+      - uses: actions/checkout@v7
+      - name: Verify CMake version
+        run: cmake --version
+      - name: Configure and build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Portable tests
+        working-directory: build
+        run: ctest --output-on-failure -L portable
+
+  sanitizers:
+    name: Linux Clang ASan and UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: >-
+          cmake -S . -B build-sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build-sanitize --parallel
+      - name: Sanitizer tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-sanitize --output-on-failure -L portable
+
+  python-ort-release:
+    name: Linux full Python and ONNX Runtime
+    runs-on: ubuntu-latest
+    env:
+      ORT_VERSION: 1.19.2
+      ORT_SHA256: eb00c64e0041f719913c4080e0fed7d9963dc3aa9b54664df6036d8308dbcd33
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned Python release profile
+        run: |
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            torch==2.8.0 torchvision==0.23.0
+          python -m pip install -r python/requirements.txt -c .github/constraints-ci.txt
+      - name: Download pinned ONNX Runtime C++ SDK
+        shell: bash
+        run: |
+          mkdir -p .ci
+          curl --fail --location --retry 3 \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
+            --output .ci/onnxruntime.tgz
+          echo "${ORT_SHA256}  .ci/onnxruntime.tgz" | sha256sum --check --strict
+          tar -xzf .ci/onnxruntime.tgz -C .ci
+          echo "ORT_ROOT=$PWD/.ci/onnxruntime-linux-x64-${ORT_VERSION}" >> "$GITHUB_ENV"
+      - name: Configure full release profile
+        shell: bash
+        run: >-
+          cmake -S . -B build-release
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
+          -DWITH_ONNXRUNTIME=ON
+          -DONNXRUNTIME_ROOT="$ORT_ROOT"
+          -DCPP_ML_REQUIRE_PYTHON_DEPS=ON
+          -DPython3_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')"
+      - name: Build
+        run: cmake --build build-release --parallel
+      - name: Full release tests
+        run: ctest --test-dir build-release --output-on-failure

@@ -11,10 +11,10 @@ stand in for unmeasured model quality or portable performance.
 - [x] Shared `SmallCNN`, labels, normalization, and checkpoint loader in `python/model.py`.
 - [x] Deterministic CIFAR-10 dataloaders, training, evaluation, and metadata checkpoint.
 - [x] Synthetic tests for optimization, exact accuracy calculation, empty loaders, and transforms.
-- [ ] Train and publish a reference checkpoint/accuracy result.
+- [x] Train and validate a local reference checkpoint/accuracy result.
 
-The unchecked artifact is deliberately not required for the source release. No accuracy number is
-claimed until a reproducible full training run is captured.
+V1.1 captured 79.90% test accuracy under its exact local CPU protocol. The checkpoint remains an
+ignored local artifact; it is not published or committed.
 
 ### 2. ONNX export and parity — complete
 
@@ -45,27 +45,40 @@ claimed until a reproducible full training run is captured.
 - [x] Preprocessing, runtime-only, and in-memory pipeline boundaries.
 - [x] Warm-up exclusion, monotonic clock, mean, nearest-rank p50/p95, and throughput.
 - [x] Build type and iteration metadata in output.
-- [ ] Publish portable reference-machine results for a trained model.
+- [x] Capture trained-model reference-machine results with artifact hash, machine, runtime, and
+  command in the ignored local evidence bundle.
 
-The harness is validated; absolute benchmark claims remain intentionally unpublished until the
-model artifact, machine, runtime configuration, and command are recorded together.
+The harness and one machine-scoped capture are validated and documented with its exact command and
+scope. The benchmark record/model bundle remains unpublished, and no portable claim is made;
+external artifact distribution requires a separate licensing, hosting, and policy decision even
+though local provenance is complete.
 
 ## Post-v1 priorities
 
 ### V1.1 — reproducible model evidence
 
-- [ ] Pin a tested Python environment with a lock/constraints file.
-- [ ] Train a reference checkpoint with captured seed, epochs, accuracy, and hardware.
-- [ ] Publish artifact provenance/checksum outside normal Git history.
-- [ ] Capture trained-model parity, C++ prediction, and benchmark tables.
-- [ ] Add a full Python-to-C++ preprocessing fixture if the model contract changes.
+- [x] Define verification-only compiler, minimum-CMake, sanitizer, Python, and ORT CI; do not treat
+  a workflow definition as executed evidence.
+- [x] Pin and clean-install a tested Python 3.9.6/macOS arm64 constraints file.
+- [x] Train and reproduce a local reference checkpoint with captured command, seed, epochs,
+  accuracy, environment, and hardware.
+- [x] Finalize and verify a checksummed ignored local evidence bundle; make no publication claim.
+- [x] Capture trained-model parity, C++ prediction, and machine-scoped benchmark evidence.
+- [x] Keep the unchanged preprocessing contract covered by direct cross-language declaration and
+  numerical tests; a full tensor fixture remains conditional on future contract complexity.
+
+The GitHub Actions workflow remains unexecuted, so v1.1 makes no supported-platform claim from its
+definition alone.
 
 ### V1.2 — measured optimization
 
-- [ ] Establish reference release-build measurements.
-- [ ] Compare buffer reuse and batched inference with the same workload.
-- [ ] Evaluate ORT session/thread settings and graph optimization levels.
-- [ ] Keep changes only when the benchmark delta and correctness gates justify them.
+- [x] Establish the v1.1 reference Release measurement and immutable model hash.
+- [ ] Run the pre-registered runtime-only serial-eight versus batch-eight experiment.
+- [ ] Keep runtime batching only if correctness passes, median items/s improves at least 50%, at
+  least 8/10 paired runs favor batching, and group p95 does not regress.
+- [ ] Defer ORT session/thread and graph-optimization experiments until after the frozen batch
+  decision; each needs separate pre-registration.
+- [ ] Consider buffer reuse only through a separate pre-registered experiment.
 
 ### V2 — serving and packaging
 
@@ -73,7 +86,8 @@ model artifact, machine, runtime configuration, and command are recorded togethe
 - [ ] Add `GET /health` and `POST /predict` as adapters around `cpp_ml_core`.
 - [ ] Add request limits, structured errors, and integration/load tests.
 - [ ] Containerize a pinned CPU runtime and model acquisition flow.
-- [ ] Add CI across supported platforms and an explicit release artifact policy.
+- [ ] Turn verification CI into explicit supported-platform guarantees and define a release
+  artifact policy.
 
 ### Later exploration
 

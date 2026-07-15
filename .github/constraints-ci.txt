@@ -1,0 +1,7 @@
+# Direct pins for Linux/Python 3.11 portability CI, not the reference evidence lock.
+torch==2.8.0
+torchvision==0.23.0
+onnx==1.19.1
+onnxruntime==1.19.2
+numpy==2.0.2
+pillow==11.3.0

@@ -1,6 +1,7 @@
 #include "cpp_ml/inference_engine.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -29,8 +30,9 @@ ModelOutput InferenceEngine::infer(const Tensor& input) {
     if (output.logits.empty()) {
         throw std::runtime_error("inference backend returned no logits");
     }
-    if (output.inference_ms < 0.0) {
-        throw std::runtime_error("inference backend returned a negative duration");
+    if (!std::isfinite(output.inference_ms) || output.inference_ms < 0.0) {
+        throw std::runtime_error(
+            "inference backend returned a non-finite or negative duration");
     }
     return output;
 }
@@ -54,8 +56,8 @@ public:
         if (session_.GetInputCount() != 1) {
             throw std::runtime_error("v1 expects an ONNX model with exactly one input");
         }
-        if (session_.GetOutputCount() < 1) {
-            throw std::runtime_error("ONNX model has no outputs");
+        if (session_.GetOutputCount() != 1) {
+            throw std::runtime_error("v1 expects an ONNX model with exactly one output");
         }
         Ort::AllocatorWithDefaultOptions allocator;
         const auto input_name = session_.GetInputNameAllocated(0, allocator);
@@ -78,9 +80,7 @@ public:
         const auto input_shape = input_info.GetShape();
         if (input_shape.size() != 4 ||
             (input_shape[0] != -1 && input_shape[0] != 1) ||
-            (input_shape[1] != -1 && input_shape[1] != 3) ||
-            (input_shape[2] != -1 && input_shape[2] != 32) ||
-            (input_shape[3] != -1 && input_shape[3] != 32)) {
+            input_shape[1] != 3 || input_shape[2] != 32 || input_shape[3] != 32) {
             throw std::runtime_error("ONNX input must be NCHW [N,3,32,32]");
         }
 
@@ -92,7 +92,7 @@ public:
         const auto output_shape = output_info.GetShape();
         if (output_shape.size() != 2 ||
             (output_shape[0] != -1 && output_shape[0] != 1) ||
-            (output_shape[1] != -1 && output_shape[1] != 10)) {
+            output_shape[1] != 10) {
             throw std::runtime_error("ONNX logits must have shape [N,10]");
         }
     }

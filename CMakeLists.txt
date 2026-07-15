@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(cpp_inference_lab
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "Portable C++17 CIFAR-10 inference pipeline"
     LANGUAGES CXX)
 
@@ -83,7 +83,9 @@ if(BUILD_BENCHMARKS)
 endif()
 
 if(BUILD_TESTING)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
-        add_subdirectory(tests)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+        message(FATAL_ERROR
+            "BUILD_TESTING=ON but tests/CMakeLists.txt is missing")
     endif()
+    add_subdirectory(tests)
 endif()

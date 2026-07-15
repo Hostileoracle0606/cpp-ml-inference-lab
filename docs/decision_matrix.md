@@ -1,8 +1,9 @@
 # Design decision matrix
 
-This is the living architectural record for v1. A decision is **accepted** when implementation may
-proceed against it, **validated** when its stated evidence exists, and **superseded** when a later
-entry replaces it. Consequences are intentional costs, not omissions to hide.
+This is the living architectural record for v1 and v1.1. A decision is **accepted** when
+implementation may proceed against it, **validated** when its stated evidence exists, and
+**superseded** when a later entry replaces it. Consequences are intentional costs, not omissions to
+hide.
 
 ## Current decisions
 
@@ -29,6 +30,30 @@ entry replaces it. Consequences are intentional costs, not omissions to hide.
 | D-19 | Keep owning `Ort::TypeInfo` objects alive while using their unowned tensor-type/shape views. | Chain `GetInputTypeInfo().GetTensorTypeAndShapeInfo()` on a temporary; copy metadata immediately through lower-level C API. | The C++ wrapper explicitly returns an unowned const view; owner lifetime is part of correctness. | Locals add a few lines but prevent undefined metadata reads. Revisit only if a future ORT API returns an owning view. | Validated at C1 |
 | D-20 | V1 is a source release validated with a temporary random checkpoint; a trained artifact and accuracy report are separate evidence work. | Require a long CIFAR-10 run before releasing code; commit an unproven binary; imply the random model has quality. | Training cost and classifier quality are independent of whether export/runtime contracts work, and the repository must not invent accuracy evidence. | Users must train locally; no model-quality claim is made. Revisit for a model-evidence release with seed, hardware, accuracy, and checksum. | Validated at C2 |
 | D-21 | Guard cross-language preprocessing with direct shape/mean/std comparison plus C++ numerical indexing/normalization tests in v1. | Commit a 3,072-float golden tensor; duplicate only unconnected tests; parse a runtime metadata format. | The transform is a small explicit formula; the direct declaration guard detects drift and numerical tests cover behavior without a bulky fixture/config dependency. | Resizing is not compared byte-for-byte to a Python image transform. Revisit with a full tensor fixture if preprocessing becomes more complex or configurable. | Validated at C2 |
+
+## V1.1 decisions
+
+Their evidence gates are defined in `docs/v1_1_plan.md`; states change only at recorded
+checkpoints.
+
+| ID | Decision | Alternatives considered | Why | How | Consequences and revisit trigger | State |
+|---|---|---|---|---|---|---|
+| D-22 | Use deterministic stratified train/validation/test separation: 45,000/5,000 from CIFAR-10 train with seed 1337, plus the untouched 10,000 test set. | Select on the test set each epoch; random unrecorded split; no validation set. | Model selection and final quality evidence must be independent. | Record split indices, per-class counts, and digest; train/augment only the training subset, select by validation, and evaluate test once after selection. | Changes the training helper contract. Revisit only if a different dataset/protocol is versioned before an official test run. | Validated at C4/C5 |
+| D-23 | Introduce checkpoint schema v2 while retaining schema-v1 metadata and legacy raw-state compatibility. | Overwrite v1 meaning; drop old checkpoints; store metrics only in logs. | The selected weights, split, configuration, and measured accuracy must remain attributable without breaking v1 export users. | Add explicit `format_version=2` fields and dispatch raw/v1/v2 loading; reject unknown future versions clearly. | More schema tests and metadata validation. Any incompatible field change after evidence exists requires schema v3. | Validated at C5 |
+| D-24 | Run official v1.1 evidence only in a fully resolved, platform-labelled reference environment. | Continue with lower bounds; claim every platform; rely on an existing mutable venv. | Exact package resolution is required to interpret training and export evidence. | Pin direct and transitive packages for Python 3.9.6 macOS arm64, validate installation in a fresh environment, and capture installed versions. | Initial reproducibility scope is one platform. Add other platforms through separate validated constraints. | Validated at C4/C5 |
+| D-25 | Pre-register a CIFAR-10 top-1 test-accuracy floor of at least 65%. | Report any result; choose threshold after seeing test; optimize against test. | A quality claim needs an objective, above-chance gate that cannot move after observation. | Pilot/tune with validation, freeze the protocol, evaluate official test once, and fail v1.1 if selected weights score below `0.65`. | The release may remain incomplete if the floor is missed. The floor can rise before, never fall after, the official test run. | Validated at C5 |
+| D-26 | Store v1.1 model evidence only in a checksummed local bundle; make no publishing or licensing assumption. | Commit binaries; upload release assets; keep loose unverifiable local files. | Integrity/provenance are needed now, while distribution authority and licensing are outside current scope. | Build an ignored local directory atomically with relative-path manifest, file sizes, SHA-256 digests, checkpoint, ONNX, metrics, environment, benchmark, and command capture. | Other users cannot fetch the bundle. External publication requires a new explicit decision and licensing review. | Validated at C5 |
+| D-27 | Artifact acquisition/generation is explicit and never occurs during CMake configure/build. | Fetch models/runtimes in CMake; silently download during tests; require implicit local state. | Default builds must stay offline and deterministic, preserving D-08 and the v1 onboarding boundary. | Require visible Python/user commands and explicit local paths such as `ONNXRUNTIME_ROOT` and `CPP_ML_TEST_MODEL`; test missing artifacts with actionable errors. | More setup remains user-driven. Revisit only with a separately designed package manager or deployment release. | Validated at C5 |
+| D-28 | Treat CMake presets, generated ORT fixtures, and CI as verification adapters, not scientific or release-model evidence. | Defer all portability automation; treat synthetic/CI outputs as reference-model proof. | Compiler, minimum-CMake, sanitizer, and hostile-model coverage catch integration drift without changing D-24's exact reference environment or v1.1's product scope. | Keep raw CMake 3.16 canonical; make presets optional CMake 3.21+ conveniences; download Python/ORT only in explicit workflow steps; generate deterministic synthetic ONNX fixtures only under the build tree; never train, publish, or upload evidence in CI. | Workflow results may support scoped portability claims but never satisfy accuracy, benchmark, reference-lock, or local-bundle gates. Revisit with an explicit supported-platform and release-artifact policy. | Validated for local adapters at C5; workflow unexecuted |
+| D-29 | Run the official v1.1 reference training and evaluation on CPU; treat MPS as unsupported for scientific evidence in this environment. | Accept the much faster MPS metrics; abandon local training; diagnose or upgrade the external stack before continuing. | A validation-only diagnostic showed impossible MPS metrics: 98.44% after one epoch, while the same weights scored 10% on CPU. Device output therefore cannot be trusted even though a small optimizer smoke passed. | Freeze `--device cpu`, deterministic algorithms, seed 1337, batch 128, Adam `1e-3`, and 20 epochs before the official test observation. Record the failed MPS diagnostic separately and require CPU evaluation/export evidence. | The official run is slower and no MPS quality/performance claim is made. Revisit only after a pinned-stack cross-device parity test explains and eliminates the discrepancy. | Validated at C5 |
+| D-30 | Separate portable lightweight bundle verification from an opt-in deep semantic audit. | Deserialize models in the default verifier; trust hashes alone; use one dependency-heavy verifier. | Integrity/schema checking and model execution have different dependency and trust boundaries. | The standard-library verifier rejects unsafe paths, symlinks, missing/extra files, hash drift, frozen-schema drift, record disagreement, artifact-link drift, and command-provenance drift. The pinned reference environment runs `deep_verify_evidence.py`, loads the schema-v2 checkpoint with `weights_only=True`, compares checkpoint provenance to the manifest, checks ONNX, and recomputes parity. | Both checks are required for release evidence. Deep verification is only for a trusted local bundle and is not an untrusted-upload parser. | Validated at C5 |
+| D-31 | Exclude r1 from release candidacy because its raw training invocation was not captured; perform one unchanged r2 command-provenance reproduction. | Infer the command from config; mutate r1; weaken Gate G; use r1 because its metrics passed. | Gate G pre-registered exact commands, and configuration fields do not capture the shell invocation, paths, redirection, or logging behavior. | Preserve r1 as diagnostic evidence. Capture the r2 command verbatim, keep the CPU/20-epoch/seed/batch/optimizer protocol and 65% floor unchanged, and accept or reject r2 on its own gates without falling back to r1. | The test set was observed in r1, so r2 is a provenance correction—not a tuning opportunity. No hyperparameter or floor may change based on r1. | Validated at C5 |
+
+## V1.2 pre-implementation decision
+
+| ID | Decision | Alternatives considered | Why | How | Consequences and revisit trigger | State |
+|---|---|---|---|---|---|---|
+| D-32 | Limit v1.2 to a measured runtime-only batch-eight experiment; keep preprocessing, decoding, pipeline, and CLI batch-one. | Add public batch APIs across every layer; build a request queue/server; tune several batch sizes and select the best; skip batching. | The dynamic ONNX graph creates a concrete runtime hypothesis, but no multi-image consumer yet defines public ordering, timing, partial-failure, cancellation, or backpressure semantics. | Add validated `ModelOutput` shape, permit capped `[N,3,32,32] -> [N,10]` runtime execution, and compare one batch-eight call with eight serial batch-one calls over identical prepared tensors. Pre-register a 50% median items/s improvement, 8/10 favorable paired runs, no group-p95 regression, and full correctness gates before implementation. | V1.2 will not expose batching to application callers even if the runtime experiment passes. Revisit public batch APIs only with a concrete CLI/server consumer; another batch size or optimization needs a new decision before measurement. | Accepted pre-v1.2 |
 
 ## Introspection checkpoints
 
@@ -193,6 +218,196 @@ deployment mechanics, not classifier quality, and benchmark machinery is ready w
 machine-specific numbers as universal results.
 
 **Result:** Gates A–E are satisfied for the v1 source-release boundary defined by D-20. V1 is ready.
+
+### C3 — v1.1 pre-implementation audit (2026-07-14, completed)
+
+**Frozen baseline**
+
+- Local tag `v1.0.0` points to commit `c7c297a`, “Release v1.0.0 modular inference source
+  baseline.”
+- The v1.1 branch started from that clean baseline, so protocol changes can be compared and rolled
+  back without mixing them into the v1 implementation.
+- No v1.1 model training, accuracy result, evidence bundle, or benchmark result exists at C3.
+
+**Three audits carried forward**
+
+1. **C0 baseline/scope audit:** found the Stage 0 skeleton, narrowed v1 to a trustworthy CLI and
+   benchmark vertical slice, and established that cross-language contracts were the primary risk.
+2. **C1 integration/runtime audit:** validated the restrained OOP boundary, caught PPM edge cases,
+   exposed an ONNX Runtime unowned-view lifetime defect through a real model run, and showed that
+   dependency-skipped Python tests cannot count as evidence.
+3. **C2 release-readiness audit:** validated the clean source pipeline while explicitly recording
+   that random weights prove mechanics—not classifier quality—and that no trained artifact or
+   accuracy claim belonged to v1.
+
+**Post-v1 planning introspection**
+
+- The smallest coherent next value is local reference-model evidence, not serving or optimization.
+- The v1 training entry point evaluates the test loader each epoch, records a best observed metric,
+  and saves final weights; that workflow cannot support a credible selected-model accuracy claim.
+- Minimum dependency versions are adequate for development but not sufficient provenance for an
+  official reference run.
+- D-14 and D-20 anticipated an evidence policy, but current scope provides neither a trained model
+  nor integrity-bound artifact bundle.
+- External publishing and licensing authority are intentionally unresolved. C3 therefore chooses a
+  local-only bundle and makes no distribution assumption.
+
+**Decisions entering implementation**
+
+- D-22 separates selection from final test evidence.
+- D-23 makes selected-weight provenance explicit without breaking raw/v1 checkpoint consumers.
+- D-24 defines one exact reference environment rather than claiming cross-platform identity.
+- D-25 freezes the `>=65%` quality floor before the official test observation.
+- D-26 binds local artifacts and evidence with SHA-256 while deferring publication.
+- D-27 preserves offline CMake behavior and explicit artifact paths.
+
+**Result:** v1.1 protocol decisions are accepted for implementation. None is validated at C3;
+`docs/v1_1_plan.md` Gates A–G and future C4–C6 checkpoints control evidence and readiness.
+
+### C3a — verification-adapter reconciliation (2026-07-14, completed)
+
+**Observed implementation direction**
+
+- The in-progress slice defines optional CMake presets, a compiler/minimum-CMake/sanitizer CI
+  matrix, a fully provisioned Linux Python/ORT job, and deterministic valid/adversarial ONNX test
+  fixtures generated under the build tree.
+- C++ public interfaces remain unchanged. The code changes tighten PPM parsing, duration
+  validation, and the frozen ONNX metadata/runtime contract.
+- Default CMake still downloads nothing, ONNX Runtime remains optional and externally supplied,
+  and explicit workflow download steps verify the pinned SDK checksum before passing its path to
+  CMake. D-08 and D-27 therefore remain intact.
+
+**Evidence boundary**
+
+- This checkpoint records design reconciliation, not executed v1.1 gates. D-22 through D-28 are
+  accepted but not yet validated, and C4 has not been reached.
+- Generated zero-weight graphs test adapter mechanics and rejection paths; they are not trained
+  model artifacts and say nothing about accuracy.
+- The Linux/Python 3.11 workflow is portability intent, not D-24's macOS arm64/Python 3.9.6
+  reference environment. A workflow file is not evidence that GitHub has executed it.
+
+**Result:** D-28 admits verification-only automation without broadening the v1.1 scientific claim.
+Later checkpoints must report local execution separately from any remotely executed workflow.
+
+### C4 — protocol and reference-environment checkpoint (2026-07-14, completed)
+
+**Executed protocol evidence**
+
+- A fresh Python 3.9.6 virtual environment with system packages disabled installed all 20 exact
+  macOS arm64 constraints without manual changes.
+- The isolated environment passed 17/17 Python tests, the full dependency import gate, export
+  parity (`2.9802322e-08 < 1e-4` with matching classes), and a 20/20 lock-version audit.
+- The official 170,498,071-byte CIFAR-10 Python archive matched MD5
+  `c58f30108f718f92721af3b95e74349a`; torchvision verified 50,000 training and 10,000 test
+  examples.
+- The frozen split contains 45,000 training and 5,000 validation indices, zero overlap, exactly
+  4,500/500 examples per class, and digest
+  `a9ca2a07e1b376a9333b878d2677c65dc777042c44094b69aca5560d44a1755e`.
+- Local verification matrices passed 4/4 default, 3/3 sanitizer portable, 5/5 full-Python preset,
+  and 9/9 full ORT tests. The GitHub workflow itself remains unexecuted intent.
+
+**Device introspection before the official test observation**
+
+- A deterministic MPS step with synthetic data was finite, but a full validation-only epoch was
+  not credible: MPS reported loss `0.024696` and validation accuracy `0.9844`.
+- The selected training/validation indices had zero overlap, and the same post-epoch weights
+  evaluated on CPU scored `0.1000`. This isolates the discrepancy to the MPS execution path rather
+  than the split or saved weights.
+- A deterministic CPU validation-only epoch produced loss `1.703588` and accuracy `0.5102`, a
+  plausible baseline. D-29 therefore freezes CPU as the official evidence device before the test
+  set is evaluated.
+
+**Result:** WP0–WP2 and Gates B/C protocol prerequisites are validated for the scoped reference
+environment. No official test accuracy, trained artifact, benchmark, or completed evidence bundle
+exists yet; Gates D–G remain open entering WP4.
+
+### C5 — local evidence and provenance checkpoint (2026-07-15, completed)
+
+**Provenance correction**
+
+- The first CPU run selected epoch 20, reached validation accuracy `0.8128` and test accuracy
+  `0.7990`, produced trained-model parity `1.6689301e-06 < 1e-4`, and passed the 9/9 trained-model
+  ORT suite. Its bundle passed lightweight integrity verification and the deep semantic audit.
+- That r1 bundle remains diagnostic evidence only because its raw training invocation was not
+  captured. It was neither edited nor silently promoted after the omission was found.
+- D-31 froze an unchanged r2 reproduction before execution. No hyperparameter, split, seed,
+  device, optimizer, epoch count, parity tolerance, or 65% floor changed after observing r1.
+
+The exact r2 invocation was:
+
+```text
+set -o pipefail
+mkdir -p artifacts/v1.1-run-r2
+/tmp/cpp-ml-v1.1-ref-venv-20260714/bin/python python/train.py --epochs 20 --batch-size 128 --lr 0.001 --data-dir python/data --out models/cifar10_cnn-v1.1-r2.pt --num-workers 0 --seed 1337 --split-seed 1337 --no-download --record-dir artifacts/v1.1-run-r2/records --device cpu 2>&1 | tee artifacts/v1.1-run-r2/training-cpu.log
+```
+
+**R2 measured evidence**
+
+- R2 reproduced all 20 epoch loss/validation records exactly, selected epoch 20, reached validation
+  accuracy `0.8128`, and reached test accuracy `0.7990` in its one test evaluation.
+- The checkpoint SHA-256 is
+  `315b201bce905c7ddb2c4789f86cf062e18a1bcb11a7e1aa3d43965570e0ad23`.
+- The ONNX SHA-256 is
+  `fec6ac786c75d2e328618a021763b408b993b9d6246772bf305eb3cd996b255c`; the graph is
+  byte-identical to r1 because the selected weights are identical.
+- Batch-two parity was `1.6689301e-06 < 1e-4` with matching classes. The r2 trained graph passed
+  all 9/9 native Release ORT/Python CTest entries.
+- The final local manifest SHA-256 is
+  `35d391d0d2e8b41041cc01d0ea4762d5b425fa3bd3faf0647c768339226c4aad`. The lightweight verifier
+  accepted nine artifacts, and the pinned-environment deep audit matched checkpoint metadata,
+  checked ONNX, and recomputed the recorded parity.
+- The Release Apple M4/macOS 26.4/AppleClang 21/ORT 1.19.2 benchmark recorded runtime-only mean
+  `0.5322 ms`, p50 `0.4089 ms`, p95 `1.2607 ms`, and `1878.9487 operations/s`. It is one local
+  capture over 200 iterations after 20 warm-ups, not a portable performance claim. Its exact
+  command was `/tmp/cpp-ml-v11-r2-ort/inference_benchmark --model
+  models/cifar10_cnn-v1.1-r2.onnx --warmup 20 --iterations 200`.
+
+**Evidence boundary**
+
+- Before the final source-version change, native profiles had passed 4/4 default, 3/3 sanitizer
+  portable, 5/5 full-Python preset, and 9/9 full ORT. C6 reruns them against the final source.
+- CMake 3.16.8 configured and built x86_64 outputs under Rosetta; its portable label passed 3/3.
+  This is a minimum-CMake result, not native arm64 Python/ORT evidence, and C6 reruns it after the
+  version change.
+- GitHub Actions remains unexecuted workflow intent. No model, bundle, benchmark record, or
+  download URL was published.
+
+**Result:** Gates B–F pass for r2. Gate A has pre-final native and scoped CMake 3.16 evidence. Gate
+G advances to C6 source/version/claim reconciliation.
+
+### C6 — v1.1 source-release readiness checkpoint (2026-07-15, completed)
+
+**Final-source verification**
+
+- The CMake project version is `1.1.0`. A clean native Release default profile passed 4/4 CTest
+  entries, and the dependency-required Python profile passed 5/5.
+- The AppleClang ASan/UBSan build passed all 3/3 portable entries with
+  `detect_leaks=0:halt_on_error=1`; Apple's runtime rejected the initial Linux-only
+  `detect_leaks=1` option before code execution, so that option failure is not represented as a
+  code test.
+- The native Release trained-model profile passed 9/9 with ONNX Runtime 1.19.2 and the r2 ONNX
+  hash. The isolated Python suite contains 18/18 passing tests.
+- Official checksum-verified CMake 3.16.8 configured and built x86_64 Release outputs under
+  Rosetta; its portable label passed 3/3 against the final source.
+- The r2-final lightweight verifier passed after sealing. The canonical post-seal trusted-local
+  deep-audit command then loaded the schema-v2 checkpoint with weights-only semantics, matched
+  internal metadata, checked ONNX, and recomputed parity.
+
+**Claim and release reconciliation**
+
+- Every documented model-quality, parity, integrity, and latency number maps to the r2 manifest,
+  a hashed record, or captured command output.
+- Benchmark scope is limited to the recorded Apple M4/macOS 26.4/AppleClang 21/ONNX Runtime 1.19.2
+  machine, hashed ONNX graph, and in-memory workload. It is not a portable performance claim.
+- Checkpoint, ONNX, dataset, and evidence bundles remain ignored local artifacts. No publication,
+  licensing, hosting, retention, or download guarantee is made.
+- GitHub Actions remains unexecuted and supports no platform-status claim. Its workflow is a
+  verification adapter whose results must be reported separately if it is later run.
+- D-32 freezes the next runtime-only batch experiment before implementation or measurement; it
+  does not broaden the v1.1 product boundary.
+
+**Result:** Gates A–G pass in their stated scopes. V1.1 is ready as a source release with
+reproducible local reference-model evidence, not as a binary-model distribution.
 
 ## How to update this record
 

@@ -212,6 +212,28 @@ TEST_CASE(ppm_loader_reads_ascii_and_binary_rgb_without_external_dependencies) {
     EXPECT_EQ(binary.pixels, (std::vector<std::uint8_t>{0, 127, 255}));
 }
 
+TEST_CASE(ppm_binary_loader_handles_crlf_without_skipping_raster_whitespace) {
+    TemporaryFile crlf_file(".ppm");
+    {
+        std::ofstream stream(crlf_file.path(), std::ios::binary);
+        stream << "P6\r\n1 1\r\n255\r\n";
+        const std::array<char, 3> bytes = {char{0}, char{127}, static_cast<char>(255)};
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    const Image crlf = cpp_ml::FileImageLoader{}.load(crlf_file.path());
+    EXPECT_EQ(crlf.pixels, (std::vector<std::uint8_t>{0, 127, 255}));
+
+    TemporaryFile whitespace_pixel(".ppm");
+    {
+        std::ofstream stream(whitespace_pixel.path(), std::ios::binary);
+        stream << "P6\n1 1\n255\n";
+        const std::array<char, 3> bytes = {char{10}, char{32}, char{13}};
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    const Image whitespace = cpp_ml::FileImageLoader{}.load(whitespace_pixel.path());
+    EXPECT_EQ(whitespace.pixels, (std::vector<std::uint8_t>{10, 32, 13}));
+}
+
 TEST_CASE(ppm_ascii_loader_accepts_black_pixel_zero_regression) {
     TemporaryFile black_pixel(".ppm");
     {
@@ -285,6 +307,18 @@ TEST_CASE(inference_engine_rejects_invalid_input_and_backend_results) {
     InferenceEngine timing_engine(std::make_unique<RecordingBackend>(
         timing_state, ModelOutput{{1.0F}, -0.01}));
     EXPECT_THROW(timing_engine.infer(Tensor{{1}, {1.0F}}), std::runtime_error);
+
+    auto infinite_state = std::make_shared<BackendState>();
+    InferenceEngine infinite_engine(std::make_unique<RecordingBackend>(
+        infinite_state,
+        ModelOutput{{1.0F}, std::numeric_limits<double>::infinity()}));
+    EXPECT_THROW(infinite_engine.infer(Tensor{{1}, {1.0F}}), std::runtime_error);
+
+    auto nan_state = std::make_shared<BackendState>();
+    InferenceEngine nan_engine(std::make_unique<RecordingBackend>(
+        nan_state,
+        ModelOutput{{1.0F}, std::numeric_limits<double>::quiet_NaN()}));
+    EXPECT_THROW(nan_engine.infer(Tensor{{1}, {1.0F}}), std::runtime_error);
 }
 
 TEST_CASE(pipeline_orchestrates_preprocessing_inference_and_decoding) {

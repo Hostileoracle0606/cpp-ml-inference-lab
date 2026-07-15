@@ -9,7 +9,7 @@
 namespace cpp_ml {
 namespace {
 
-std::string read_token(std::istream& input) {
+std::string read_token(std::istream& input, char* trailing_delimiter = nullptr) {
     std::string token;
     char character = '\0';
 
@@ -27,10 +27,16 @@ std::string read_token(std::istream& input) {
 
     while (input.get(character)) {
         if (std::isspace(static_cast<unsigned char>(character)) != 0) {
+            if (trailing_delimiter != nullptr) {
+                *trailing_delimiter = character;
+            }
             break;
         }
         if (character == '#') {
             input.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            if (trailing_delimiter != nullptr) {
+                *trailing_delimiter = '\n';
+            }
             break;
         }
         token.push_back(character);
@@ -88,7 +94,10 @@ Image FileImageLoader::load(const std::filesystem::path& path) const {
     image.width = parse_positive(read_token(input), "width");
     image.height = parse_positive(read_token(input), "height");
     image.channels = 3;
-    const auto maximum = parse_positive(read_token(input), "maximum sample value");
+    char raster_delimiter = '\0';
+    const auto maximum = parse_positive(
+        read_token(input, magic == "P6" ? &raster_delimiter : nullptr),
+        "maximum sample value");
     if (maximum > 255) {
         throw std::runtime_error("16-bit PPM images are not supported");
     }
@@ -108,6 +117,11 @@ Image FileImageLoader::load(const std::filesystem::path& path) const {
     image.pixels.resize(sample_count);
 
     if (magic == "P6") {
+        // Treat CRLF as one logical header delimiter. Do not skip arbitrary
+        // whitespace here: every byte after the delimiter belongs to the raster.
+        if (raster_delimiter == '\r' && input.peek() == '\n') {
+            input.get();
+        }
         input.read(reinterpret_cast<char*>(image.pixels.data()),
                    static_cast<std::streamsize>(sample_count));
         if (input.gcount() != static_cast<std::streamsize>(sample_count)) {

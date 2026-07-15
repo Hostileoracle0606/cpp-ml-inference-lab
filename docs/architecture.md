@@ -28,6 +28,29 @@ python/export_onnx.py ------------------------> models/cifar10_cnn.onnx
 The parity gate uses an identical seeded batch in PyTorch and Python ONNX Runtime. A graph passes
 only when maximum absolute logit difference is below `1e-4` and every top class matches.
 
+## V1.1 evidence architecture
+
+```text
+stratified 45k/5k split -> validation-only selection -> one test evaluation per run
+          -> schema-v2 checkpoint -> ONNX export/parity -> ignored local bundle
+                                                  |-> lightweight integrity/schema verifier
+                                                  `-> pinned-environment deep semantic audit
+```
+
+Checkpoint schema v2 binds the selected weights to the split digest, training configuration,
+validation/test metrics, exact environment, and epoch history. The loader still accepts v1
+metadata checkpoints and legacy raw state dictionaries; unknown future schemas fail closed.
+
+The lightweight bundle verifier uses the Python standard library and never deserializes a model.
+It checks relative paths, regular-file ownership, exact artifact sets, sizes, SHA-256 hashes,
+frozen evidence schemas, cross-record equality, model-hash references, and command provenance. The
+separate deep audit is only for a trusted local bundle in the pinned ML environment. It uses
+weights-only checkpoint loading, compares internal checkpoint metadata to the manifest, runs the
+ONNX checker, and recomputes PyTorch/ONNX Runtime parity.
+
+These additions are Python protocol/value modules. V1.1 introduces no new C++ polymorphic seam;
+the same session-owning backend and composed single-image pipeline consume the trained graph.
+
 ## C++ dependency direction
 
 ```text
@@ -81,7 +104,7 @@ ONNX Runtime headers are private to the runtime adapter implementation.
 | Mean | `(0.4914, 0.4822, 0.4465)` |
 | Standard deviation | `(0.2470, 0.2435, 0.2616)` |
 | ONNX input | Exactly one float32 endpoint named `input`; batch is dynamic or one |
-| ONNX output | First float32 endpoint named `logits`, shape `[N, 10]` |
+| ONNX output | Exactly one float32 endpoint named `logits`, shape `[N, 10]` |
 | Class order | airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck |
 | Confidence | Winning value after numerically stable softmax |
 
@@ -142,6 +165,7 @@ Core modules throw contextual standard exceptions. `main` owns terminal presenta
 usage errors to exit 2 and inference/runtime errors to exit 1. The portable decoder limits PPM
 dimensions and decoded pixels before allocation.
 
-V1 assumes one CPU model and one caller. It makes no thread-safety, server, untrusted-media,
-PNG/JPEG, GPU, or quantified performance/accuracy claim. Those constraints are release boundaries,
-not hidden production promises.
+V1.1 assumes one CPU model and one caller. Its 79.90% CIFAR-10 result and benchmark apply only to
+the hashed local reference artifacts and recorded environment. It makes no MPS, thread-safety,
+server, untrusted-media, PNG/JPEG, GPU, artifact-publication, or portable-latency claim. Those
+constraints are release boundaries, not hidden production promises.
