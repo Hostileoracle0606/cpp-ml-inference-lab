@@ -406,6 +406,24 @@ def _validate_provenance(provenance: Mapping[str, Any]) -> None:
             raise ValueError(f"provenance argv is invalid: {name}")
 
 
+def _validate_command_links(
+    benchmark: Mapping[str, Any], provenance: Mapping[str, Any]
+) -> None:
+    """Reject contradictory duplicated commands in structured evidence records."""
+
+    commands = provenance["commands"]
+    expected = {
+        "benchmark": benchmark["benchmark"]["command"],
+        "cli_smoke": benchmark["prediction_smoke"]["command"],
+        "trained_ctest": benchmark["verification"]["ctest_command"],
+    }
+    for name, command in expected.items():
+        if commands[name]["command"] != command:
+            raise ValueError(
+                f"provenance command {name} differs from benchmark evidence"
+            )
+
+
 def _validate_benchmark(benchmark: Mapping[str, Any]) -> str:
     required_sections = {
         "artifact",
@@ -598,6 +616,7 @@ def build_evidence_bundle(
         training, parity, benchmark, environment
     )
     _validate_provenance(provenance)
+    _validate_command_links(benchmark, provenance)
 
     output = Path(destination)
     if output.exists():
@@ -799,6 +818,9 @@ def verify_evidence_bundle(bundle: str | Path) -> dict[str, Any]:
         manifest_records["environment"],
     )
     _validate_provenance(manifest_records["provenance"])
+    _validate_command_links(
+        manifest_records["benchmark"], manifest_records["provenance"]
+    )
     if benchmark_onnx_sha256 != artifacts["onnx"].get("sha256"):
         raise ValueError("benchmark ONNX SHA-256 does not match bundled ONNX artifact")
     return manifest

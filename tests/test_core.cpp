@@ -271,6 +271,13 @@ TEST_CASE(ppm_loader_rejects_missing_or_unsupported_inputs) {
         stream << "P3\n18446744073709551615 18446744073709551615\n255\n0 0 0\n";
     }
     EXPECT_THROW(cpp_ml::FileImageLoader{}.load(oversized.path()), std::runtime_error);
+
+    TemporaryFile long_token(".ppm");
+    {
+        std::ofstream stream(long_token.path());
+        stream << "P3\n" << std::string(65, '9') << " 1\n255\n0 0 0\n";
+    }
+    EXPECT_THROW(cpp_ml::FileImageLoader{}.load(long_token.path()), std::runtime_error);
 }
 
 TEST_CASE(inference_engine_reuses_its_injected_backend) {

@@ -9,9 +9,17 @@
 namespace cpp_ml {
 namespace {
 
+constexpr std::size_t kMaxPpmTokenLength = 64;
+
 std::string read_token(std::istream& input, char* trailing_delimiter = nullptr) {
     std::string token;
     char character = '\0';
+    const auto append = [&](char value) {
+        if (token.size() >= kMaxPpmTokenLength) {
+            throw std::runtime_error("PPM token exceeds safety limit");
+        }
+        token.push_back(value);
+    };
 
     while (input.get(character)) {
         if (std::isspace(static_cast<unsigned char>(character)) != 0) {
@@ -21,7 +29,7 @@ std::string read_token(std::istream& input, char* trailing_delimiter = nullptr) 
             input.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             continue;
         }
-        token.push_back(character);
+        append(character);
         break;
     }
 
@@ -39,7 +47,7 @@ std::string read_token(std::istream& input, char* trailing_delimiter = nullptr) 
             }
             break;
         }
-        token.push_back(character);
+        append(character);
     }
 
     if (token.empty()) {

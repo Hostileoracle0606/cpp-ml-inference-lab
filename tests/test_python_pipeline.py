@@ -681,6 +681,13 @@ class EvidenceManifestTests(unittest.TestCase):
                 "command": f"{name} --reference-test",
                 "argv": [name, "--reference-test"],
             }
+        commands["benchmark"]["command"] = benchmark["benchmark"]["command"]
+        commands["cli_smoke"]["command"] = benchmark["prediction_smoke"][
+            "command"
+        ]
+        commands["trained_ctest"]["command"] = benchmark["verification"][
+            "ctest_command"
+        ]
         provenance = {
             "schema_version": 1,
             "reference_run_id": "v1.1-run-test",
@@ -1003,6 +1010,13 @@ class EvidenceManifestTests(unittest.TestCase):
                     benchmark=benchmark,
                     environment=environment,
                     provenance=altered_provenance,
+                )
+
+            command_link_drift = copy.deepcopy(provenance)
+            command_link_drift["commands"]["benchmark"]["command"] += " --drift"
+            with self.assertRaisesRegex(ValueError, "differs from benchmark evidence"):
+                evidence_manifest._validate_command_links(
+                    benchmark, command_link_drift
                 )
 
             provenance_mismatch_bundle = directory / "provenance-manifest-mismatch"

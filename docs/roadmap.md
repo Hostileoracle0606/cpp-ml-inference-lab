@@ -99,6 +99,7 @@ definition alone.
 ## Decision discipline
 
 Architecture changes are recorded in [decision_matrix.md](decision_matrix.md) with alternatives,
-consequences, and revisit triggers. The release boundary and gates live in
-[v1_plan.md](v1_plan.md). Each vertical slice ends with an evidence checkpoint; green optional tests
-or random-weight artifacts are never presented as model-quality proof.
+consequences, and revisit triggers. Release boundaries and gates live in
+[v1_plan.md](v1_plan.md), [v1_1_plan.md](v1_1_plan.md), and
+[v1_2_plan.md](v1_2_plan.md). Each vertical slice ends with an evidence checkpoint; green optional
+tests or random-weight artifacts are never presented as model-quality proof.
