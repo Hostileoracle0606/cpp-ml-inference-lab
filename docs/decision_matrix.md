@@ -61,7 +61,7 @@ checkpoints.
 | ID | Decision | Alternatives considered | Why | How | Consequences and revisit trigger | State |
 |---|---|---|---|---|---|---|
 | D-34 | Merge PR #1 only after every check on its latest head passes, using a normal merge commit. | Merge while checks are pending; squash; GitHub rebase; push directly to `main`. | The repository has no enforcing branch rule, while evidence cites the exact v1.0, v1.1, candidate, and rollback commits. A manual green-head gate protects `main`; a normal merge preserves that provenance. | Reconcile PR metadata and current-status docs, confirm no unresolved review threads or conflicts, wait for all seven workflow jobs on the final head SHA, then merge without bypassing checks. | History intentionally retains the rejected candidate and revert. Enforcement is procedural until a separately approved branch ruleset exists; revisit protection before accepting outside contributors. | Accepted at C9 |
-| D-35 | Make the bare Ubuntu minimum-CMake bootstrap noninteractive, deterministic in timezone, and bounded to 15 minutes. | Retry the blocked run; remove the job; answer prompts manually; permit the default six-hour timeout. | Installing the compiler pulled in `tzdata`; its geographic-area prompt blocked an unattended runner without exercising the build. CI setup must fail or finish without human input. | Set job-level `DEBIAN_FRONTEND=noninteractive` and `TZ=Etc/UTC`, retain the Ubuntu 20.04/CMake 3.16 package source, and add `timeout-minutes: 15`. | The job now fails within a bounded window if package setup regresses. Revisit the base image before Ubuntu 20.04 package availability becomes unreliable. | Accepted at C9; validation required on final PR head |
+| D-35 | Make the bare Ubuntu minimum-CMake bootstrap explicit, noninteractive, deterministic in timezone, and bounded to 15 minutes. | Retry blocked runs; remove the job; answer prompts manually; rely on undeclared image tools; permit the default six-hour timeout. | Installing the compiler pulled in `tzdata`, whose prompt blocked an unattended runner. After that was exposed, CMake correctly reported that the bare image had no build program. CI setup must declare every tool and fail or finish without human input. | Set job-level `DEBIAN_FRONTEND=noninteractive` and `TZ=Etc/UTC`; explicitly install CMake, the C++ compiler, Make, Git, and certificates; verify their versions; retain the Ubuntu 20.04/CMake 3.16 source; and add `timeout-minutes: 15`. | The job now fails within a bounded window if package setup or an explicit tool regresses. Revisit the base image before Ubuntu 20.04 package availability becomes unreliable. | Accepted at C9; validation required on final PR head |
 
 ## Introspection checkpoints
 
@@ -480,7 +480,8 @@ reuse design, or optimization requires a new decision before implementation or m
 - The repository has no branch protection rule or ruleset, so the merge procedure manually requires
   every job on the latest PR head to pass, a conflict-free merge, and no unresolved review threads.
 - The first two minimum-CMake jobs blocked before checkout because `tzdata` requested an interactive
-  geographic area. D-35 makes package setup noninteractive and adds a 15-minute job timeout.
+  geographic area. Once noninteractive setup exposed the next step, the bare image also lacked
+  `make`. D-35 declares and verifies the full toolchain and adds a 15-minute job timeout.
 - A normal merge commit is required. Squashing would collapse the candidate/rollback audit trail,
   while GitHub rebasing would create new commit IDs that disagree with the recorded provenance.
 - PR scope, verification evidence, and the negative v1.2 result are recorded in its description.

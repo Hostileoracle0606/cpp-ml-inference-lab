@@ -53,10 +53,10 @@ jobs:
       TZ: Etc/UTC
     steps:
       - name: Install minimum toolchain
-        run: apt-get update && apt-get install -y --no-install-recommends cmake g++ git ca-certificates
+        run: apt-get update && apt-get install -y --no-install-recommends cmake g++ make git ca-certificates
       - uses: actions/checkout@v7
-      - name: Verify CMake version
-        run: cmake --version
+      - name: Verify toolchain versions
+        run: cmake --version && c++ --version && make --version
       - name: Configure and build
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
       - name: Build
