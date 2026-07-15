@@ -7,8 +7,9 @@ environment, verbatim invocation, model-quality result, export/parity result, C+
 benchmark, checksummed bundle, final source profiles, and version reconciliation have executed
 evidence. V1.1 is ready as a source release with reproducible local model evidence. Evidence
 artifacts remain ignored and local; no model, bundle, benchmark artifact, or download URL is
-published, and GitHub Actions remains unexecuted. Implementation started from the frozen local
-`v1.0.0` tag at commit `c7c297a`.
+published. GitHub Actions first executed later during pull-request integration; those results are
+separate verification-adapter evidence, not part of the frozen local reference-model record.
+Implementation started from the frozen local `v1.0.0` tag at commit `c7c297a`.
 
 ## Goal
 

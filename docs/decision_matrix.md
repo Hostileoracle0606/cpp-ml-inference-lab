@@ -44,7 +44,7 @@ checkpoints.
 | D-25 | Pre-register a CIFAR-10 top-1 test-accuracy floor of at least 65%. | Report any result; choose threshold after seeing test; optimize against test. | A quality claim needs an objective, above-chance gate that cannot move after observation. | Pilot/tune with validation, freeze the protocol, evaluate official test once, and fail v1.1 if selected weights score below `0.65`. | The release may remain incomplete if the floor is missed. The floor can rise before, never fall after, the official test run. | Validated at C5 |
 | D-26 | Store v1.1 model evidence only in a checksummed local bundle; make no publishing or licensing assumption. | Commit binaries; upload release assets; keep loose unverifiable local files. | Integrity/provenance are needed now, while distribution authority and licensing are outside current scope. | Build an ignored local directory atomically with relative-path manifest, file sizes, SHA-256 digests, checkpoint, ONNX, metrics, environment, benchmark, and command capture. | Other users cannot fetch the bundle. External publication requires a new explicit decision and licensing review. | Validated at C5 |
 | D-27 | Artifact acquisition/generation is explicit and never occurs during CMake configure/build. | Fetch models/runtimes in CMake; silently download during tests; require implicit local state. | Default builds must stay offline and deterministic, preserving D-08 and the v1 onboarding boundary. | Require visible Python/user commands and explicit local paths such as `ONNXRUNTIME_ROOT` and `CPP_ML_TEST_MODEL`; test missing artifacts with actionable errors. | More setup remains user-driven. Revisit only with a separately designed package manager or deployment release. | Validated at C5 |
-| D-28 | Treat CMake presets, generated ORT fixtures, and CI as verification adapters, not scientific or release-model evidence. | Defer all portability automation; treat synthetic/CI outputs as reference-model proof. | Compiler, minimum-CMake, sanitizer, and hostile-model coverage catch integration drift without changing D-24's exact reference environment or v1.1's product scope. | Keep raw CMake 3.16 canonical; make presets optional CMake 3.21+ conveniences; download Python/ORT only in explicit workflow steps; generate deterministic synthetic ONNX fixtures only under the build tree; never train, publish, or upload evidence in CI. | Workflow results may support scoped portability claims but never satisfy accuracy, benchmark, reference-lock, or local-bundle gates. Revisit with an explicit supported-platform and release-artifact policy. | Validated for local adapters at C5; workflow unexecuted |
+| D-28 | Treat CMake presets, generated ORT fixtures, and CI as verification adapters, not scientific or release-model evidence. | Defer all portability automation; treat synthetic/CI outputs as reference-model proof. | Compiler, minimum-CMake, sanitizer, and hostile-model coverage catch integration drift without changing D-24's exact reference environment or v1.1's product scope. | Keep raw CMake 3.16 canonical; make presets optional CMake 3.21+ conveniences; download Python/ORT only in explicit workflow steps; generate deterministic synthetic ONNX fixtures only under the build tree; never train, publish, or upload evidence in CI. | Workflow results may support scoped portability claims but never satisfy accuracy, benchmark, reference-lock, or local-bundle gates. Revisit with an explicit supported-platform and release-artifact policy. | Validated locally at C5 and exercised in PR CI at C9 |
 | D-29 | Run the official v1.1 reference training and evaluation on CPU; treat MPS as unsupported for scientific evidence in this environment. | Accept the much faster MPS metrics; abandon local training; diagnose or upgrade the external stack before continuing. | A validation-only diagnostic showed impossible MPS metrics: 98.44% after one epoch, while the same weights scored 10% on CPU. Device output therefore cannot be trusted even though a small optimizer smoke passed. | Freeze `--device cpu`, deterministic algorithms, seed 1337, batch 128, Adam `1e-3`, and 20 epochs before the official test observation. Record the failed MPS diagnostic separately and require CPU evaluation/export evidence. | The official run is slower and no MPS quality/performance claim is made. Revisit only after a pinned-stack cross-device parity test explains and eliminates the discrepancy. | Validated at C5 |
 | D-30 | Separate portable lightweight bundle verification from an opt-in deep semantic audit. | Deserialize models in the default verifier; trust hashes alone; use one dependency-heavy verifier. | Integrity/schema checking and model execution have different dependency and trust boundaries. | The standard-library verifier rejects unsafe paths, symlinks, missing/extra files, hash drift, frozen-schema drift, record disagreement, artifact-link drift, and command-provenance drift. The pinned reference environment runs `deep_verify_evidence.py`, loads the schema-v2 checkpoint with `weights_only=True`, compares checkpoint provenance to the manifest, checks ONNX, and recomputes parity. | Both checks are required for release evidence. Deep verification is only for a trusted local bundle and is not an untrusted-upload parser. | Validated at C5 |
 | D-31 | Exclude r1 from release candidacy because its raw training invocation was not captured; perform one unchanged r2 command-provenance reproduction. | Infer the command from config; mutate r1; weaken Gate G; use r1 because its metrics passed. | Gate G pre-registered exact commands, and configuration fields do not capture the shell invocation, paths, redirection, or logging behavior. | Preserve r1 as diagnostic evidence. Capture the r2 command verbatim, keep the CPU/20-epoch/seed/batch/optimizer protocol and 65% floor unchanged, and accept or reject r2 on its own gates without falling back to r1. | The test set was observed in r1, so r2 is a provenance correction—not a tuning opportunity. No hyperparameter or floor may change based on r1. | Validated at C5 |
@@ -55,6 +55,12 @@ checkpoints.
 |---|---|---|---|---|---|---|
 | D-32 | Limit v1.2 to a measured runtime-only batch-eight experiment; keep preprocessing, decoding, pipeline, and CLI batch-one. | Add public batch APIs across every layer; build a request queue/server; tune several batch sizes and select the best; skip batching. | The dynamic ONNX graph creates a concrete runtime hypothesis, but no multi-image consumer yet defines public ordering, timing, partial-failure, cancellation, or backpressure semantics. | Add validated `ModelOutput` shape, permit capped `[N,3,32,32] -> [N,10]` runtime execution, and compare one batch-eight call with eight serial batch-one calls over identical prepared tensors. Pre-register a 50% median items/s improvement, 8/10 favorable paired runs, no group-p95 regression, and full correctness gates before implementation. | V1.2 will not expose batching to application callers even if the runtime experiment passes. Revisit public batch APIs only with a concrete CLI/server consumer; another batch size or optimization needs a new decision before measurement. | Tested negative and rolled back at C8 |
 | D-33 | Freeze the v1.2 paired sampling and aggregation recipe before its first performance run. | Choose counts after observing variance; compare separate sessions; retain summaries only; replace outlier runs. | D-32 fixed thresholds but left sample counts, inputs, and tail aggregation underspecified, allowing accidental post-result tuning. | In ten fresh processes, use one session and eight prepared rows with byte `i` in row `r` equal to `(i*37+r*17)%256`; run 20 warm-ups and 200 measured eight-item workloads per mode; alternate order. Per-run items/s is `1600/sum(group_ms)*1000`; median averages sorted ratios five and six; stability counts ratios above one; pooled p95 uses nearest rank over 2,000 samples per mode. Verify exact source/model/runtime/build provenance before run one and abort without selective replacement. | The result applies only to the frozen Apple M4/macOS 26.4/AppleClang 21/ORT 1.19.2 environment and exact graph. A different batch size or optimization needs a new pre-registration. | Validated at C8 |
+
+## Integration decisions
+
+| ID | Decision | Alternatives considered | Why | How | Consequences and revisit trigger | State |
+|---|---|---|---|---|---|---|
+| D-34 | Merge PR #1 only after every check on its latest head passes, using a normal merge commit. | Merge while checks are pending; squash; GitHub rebase; push directly to `main`. | The repository has no enforcing branch rule, while evidence cites the exact v1.0, v1.1, candidate, and rollback commits. A manual green-head gate protects `main`; a normal merge preserves that provenance. | Reconcile PR metadata and current-status docs, confirm no unresolved review threads or conflicts, wait for all seven workflow jobs on the final head SHA, then merge without bypassing checks. | History intentionally retains the rejected candidate and revert. Enforcement is procedural until a separately approved branch ruleset exists; revisit protection before accepting outside contributors. | Accepted at C9 |
 
 ## Introspection checkpoints
 
@@ -370,8 +376,8 @@ mkdir -p artifacts/v1.1-run-r2
 - CMake 3.16.8 configured and built x86_64 outputs under Rosetta; its portable label passed 3/3.
   This is a minimum-CMake result, not native arm64 Python/ORT evidence, and C6 reruns it after the
   version change.
-- GitHub Actions remains unexecuted workflow intent. No model, bundle, benchmark record, or
-  download URL was published.
+- At C5, GitHub Actions had not yet executed; it was workflow intent only. No model, bundle,
+  benchmark record, or download URL was published.
 
 **Result:** Gates B–F pass for r2. Gate A has pre-final native and scoped CMake 3.16 evidence. Gate
 G advances to C6 source/version/claim reconciliation.
@@ -402,8 +408,8 @@ G advances to C6 source/version/claim reconciliation.
   machine, hashed ONNX graph, and in-memory workload. It is not a portable performance claim.
 - Checkpoint, ONNX, dataset, and evidence bundles remain ignored local artifacts. No publication,
   licensing, hosting, retention, or download guarantee is made.
-- GitHub Actions remains unexecuted and supports no platform-status claim. Its workflow is a
-  verification adapter whose results must be reported separately if it is later run.
+- At C6, GitHub Actions had not yet executed and supported no platform-status claim. Its workflow
+  remained a verification adapter whose later results must be reported separately.
 - D-32 freezes the next runtime-only batch experiment before implementation or measurement; it
   does not broaden the v1.1 product boundary.
 
@@ -463,6 +469,22 @@ the one official D-33 invocation.
 
 **Result:** no v1.2 release or batching claim is made. Another batch size, threading policy, buffer
 reuse design, or optimization requires a new decision before implementation or measurement.
+
+### C9 — pull-request merge-readiness checkpoint (2026-07-15, active)
+
+**Why and how**
+
+- PR #1 first exercised the seven-job GitHub portability workflow. These jobs validate integration
+  paths; they do not replace the frozen v1.1 local evidence or create a supported-platform promise.
+- The repository has no branch protection rule or ruleset, so the merge procedure manually requires
+  every job on the latest PR head to pass, a conflict-free merge, and no unresolved review threads.
+- A normal merge commit is required. Squashing would collapse the candidate/rollback audit trail,
+  while GitHub rebasing would create new commit IDs that disagree with the recorded provenance.
+- PR scope, verification evidence, and the negative v1.2 result are recorded in its description.
+  Live check state remains on GitHub rather than being frozen into a self-invalidating source claim.
+
+**Result:** documentation and merge policy are reconciled. PR #1 remains gated on successful CI for
+its final head before it may leave draft state and merge into `main`.
 
 ## How to update this record
 

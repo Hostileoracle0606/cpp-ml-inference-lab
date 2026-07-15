@@ -67,8 +67,9 @@ though local provenance is complete.
 - [x] Keep the unchanged preprocessing contract covered by direct cross-language declaration and
   numerical tests; a full tensor fixture remains conditional on future contract complexity.
 
-The GitHub Actions workflow remains unexecuted, so v1.1 makes no supported-platform claim from its
-definition alone.
+The GitHub Actions workflow now executes on pull requests and pushes to `main`. Its results are
+scoped integration evidence, not a supported-platform claim or a replacement for the frozen local
+reference-model evidence.
 
 ### V1.2 — measured optimization
 

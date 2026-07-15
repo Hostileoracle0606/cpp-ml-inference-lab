@@ -49,7 +49,7 @@ execution remain later work.
 | Local evidence bundle | Lightweight and deep verification passed | Manifest SHA-256 `35d391d0…c4aad`; 9 hashed artifacts |
 | Runtime-only benchmark | mean 0.5322 ms; p50 0.4089 ms; p95 1.2607 ms | Apple M4, macOS 26.4, AppleClang 21, ORT 1.19.2, 20 warm-ups + 200 iterations |
 | Minimum CMake | 3/3 portable tests passed | CMake 3.16.8 x86_64 under Rosetta; not native Python/ORT evidence |
-| GitHub Actions | Defined, not executed | Workflow intent only; no supported-platform claim |
+| GitHub Actions | Pull-request portability matrix executed | Verification adapters only; final PR head must be green, with no supported-platform claim |
 
 The benchmark is one machine-scoped capture. Its in-memory boundary excludes file decode and
 session construction, and its values are not a portable performance promise. The reference Python
