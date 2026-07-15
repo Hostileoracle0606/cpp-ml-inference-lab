@@ -2,12 +2,13 @@
 
 ## Status
 
-Pre-implementation contract. No v1.2 batching code or performance result exists yet. Work starts
-only after the v1.1 source tag and its local r2 evidence bundle are complete.
+Completed negative experiment. The candidate passed every correctness gate, but its measured median
+throughput improvement was `12.1093%`, below the frozen `50%` requirement. The runtime/API candidate
+was therefore rolled back, the project remains version `1.1.0`, and no v1.2 release was created.
 
 ## Goal
 
-V1.2 tests one narrow hypothesis: the v1.1 dynamic-batch ONNX graph can process a batch of eight
+The experiment tested one narrow hypothesis: the v1.1 dynamic-batch ONNX graph could process eight
 prepared CIFAR-10 tensors with materially higher item throughput than eight batch-one calls on the
 same local reference machine.
 
@@ -23,7 +24,7 @@ runtime change is rolled back rather than hidden or optimized after the fact.
 - A generic model/shape API or another polymorphic interface.
 - A portable performance claim, published model, or remotely executed CI claim.
 
-## Smallest design change
+## Candidate design tested and rolled back
 
 - Add the runtime tensor shape to `ModelOutput` so output ownership and dimensions travel together.
 - Keep `IInferenceBackend::run(const Tensor&) -> ModelOutput` unchanged.
@@ -61,18 +62,18 @@ hierarchy.
 - Artifact: the exact ONNX SHA-256 accepted by the v1.1 r2 bundle.
 - Build/runtime: Release, AppleClang, ONNX Runtime 1.19.2 CPU, same recorded Apple reference
   machine and operating system.
-- Inputs: the same prepared tensor values for both modes; session construction and file I/O remain
-  outside measurement.
+- Inputs: eight distinct prepared rows whose byte `i` in zero-based row `r` was
+  `(i*37 + r*17) % 256`; session construction and file I/O remained outside measurement.
 - Candidate: batch 8. Batch 2/4/16 are not measured and then selected.
-- Sampling: exactly 10 independent paired process runs, alternating serial/batch order; each
-  process uses identical warm-up and measured iteration counts and persistent identically
-  configured sessions.
+- Sampling: exactly 10 independent paired process runs, one session per process, 20 warm-ups and
+  200 measured workloads per mode, odd runs serial-first and even runs batch-first.
 - Work accounting: every serial sample performs eight batch-one calls and every batch sample
   performs one batch-eight call over the same tensor rows.
-- Primary metric: median items/second speedup across paired process runs.
+- Primary metric: per-run items/s was `1600/sum(group_ms)*1000`; the median averaged sorted ratios
+  five and six.
 - Stability metric: at least eight of ten runs must favor batch eight.
-- Tail metric: batch-eight group p95 must not exceed serial-eight group p95. This compares the time
-  to finish the same eight-item workload, not a fictional per-item latency.
+- Tail metric: nearest-rank p95 pooled all 2,000 group samples per mode. This compares time to finish
+  the same eight-item workload, not a fictional per-item latency.
 
 ## Acceptance and rollback
 
@@ -83,6 +84,19 @@ and batch-eight group p95 does not exceed serial-eight group p95.
 If any condition fails, revert the runtime/API change, preserve the measured negative experiment
 in the decision record, and leave the source version at v1.1. A different batch size, threading
 policy, or optimization technique requires a new pre-registered decision before measurement.
+
+## Result
+
+- Correctness: pass, including trained batch-versus-single `<=1e-5` and PyTorch/ORT batch-eight
+  `2.6226044e-06 < 1e-4` parity.
+- Primary: fail — median items/s ratio `1.121093` (`12.1093%`, required at least `50%`).
+- Stability: pass — exactly `8/10` runs favored batching.
+- Tail: pass — batch group p95 `3.854375 ms`, serial group p95 `4.361750 ms`.
+- Decision: reject and roll back candidate; preserve ignored local evidence and make no portable
+  performance claim.
+
+See C7/C8 and D-32/D-33 in [decision_matrix.md](decision_matrix.md) for hashes, exact provenance,
+and the reasoning record.
 
 ## Why this precedes serving
 

@@ -129,6 +129,11 @@ path was rerun against the official 1.19.2 macOS arm64 release.
 The backend session is reused across calls. Owning raw pointers, global sessions, and per-request
 session construction are deliberately absent.
 
+A v1.2 candidate temporarily generalized only this runtime seam to dynamic batches. Its exact
+batch-eight experiment improved median item throughput by 12.1093%, below the pre-registered 50%
+adoption threshold, so the candidate was reverted. The current architecture therefore remains the
+batch-one design described above; the negative evidence is recorded in `v1_2_plan.md` and C8.
+
 ## OOP and SOLID tradeoffs
 
 - **Single responsibility:** file decoding, tensor transformation, runtime execution, prediction

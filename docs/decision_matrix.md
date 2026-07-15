@@ -49,11 +49,12 @@ checkpoints.
 | D-30 | Separate portable lightweight bundle verification from an opt-in deep semantic audit. | Deserialize models in the default verifier; trust hashes alone; use one dependency-heavy verifier. | Integrity/schema checking and model execution have different dependency and trust boundaries. | The standard-library verifier rejects unsafe paths, symlinks, missing/extra files, hash drift, frozen-schema drift, record disagreement, artifact-link drift, and command-provenance drift. The pinned reference environment runs `deep_verify_evidence.py`, loads the schema-v2 checkpoint with `weights_only=True`, compares checkpoint provenance to the manifest, checks ONNX, and recomputes parity. | Both checks are required for release evidence. Deep verification is only for a trusted local bundle and is not an untrusted-upload parser. | Validated at C5 |
 | D-31 | Exclude r1 from release candidacy because its raw training invocation was not captured; perform one unchanged r2 command-provenance reproduction. | Infer the command from config; mutate r1; weaken Gate G; use r1 because its metrics passed. | Gate G pre-registered exact commands, and configuration fields do not capture the shell invocation, paths, redirection, or logging behavior. | Preserve r1 as diagnostic evidence. Capture the r2 command verbatim, keep the CPU/20-epoch/seed/batch/optimizer protocol and 65% floor unchanged, and accept or reject r2 on its own gates without falling back to r1. | The test set was observed in r1, so r2 is a provenance correction—not a tuning opportunity. No hyperparameter or floor may change based on r1. | Validated at C5 |
 
-## V1.2 pre-implementation decision
+## V1.2 experiment decisions
 
 | ID | Decision | Alternatives considered | Why | How | Consequences and revisit trigger | State |
 |---|---|---|---|---|---|---|
-| D-32 | Limit v1.2 to a measured runtime-only batch-eight experiment; keep preprocessing, decoding, pipeline, and CLI batch-one. | Add public batch APIs across every layer; build a request queue/server; tune several batch sizes and select the best; skip batching. | The dynamic ONNX graph creates a concrete runtime hypothesis, but no multi-image consumer yet defines public ordering, timing, partial-failure, cancellation, or backpressure semantics. | Add validated `ModelOutput` shape, permit capped `[N,3,32,32] -> [N,10]` runtime execution, and compare one batch-eight call with eight serial batch-one calls over identical prepared tensors. Pre-register a 50% median items/s improvement, 8/10 favorable paired runs, no group-p95 regression, and full correctness gates before implementation. | V1.2 will not expose batching to application callers even if the runtime experiment passes. Revisit public batch APIs only with a concrete CLI/server consumer; another batch size or optimization needs a new decision before measurement. | Accepted pre-v1.2 |
+| D-32 | Limit v1.2 to a measured runtime-only batch-eight experiment; keep preprocessing, decoding, pipeline, and CLI batch-one. | Add public batch APIs across every layer; build a request queue/server; tune several batch sizes and select the best; skip batching. | The dynamic ONNX graph creates a concrete runtime hypothesis, but no multi-image consumer yet defines public ordering, timing, partial-failure, cancellation, or backpressure semantics. | Add validated `ModelOutput` shape, permit capped `[N,3,32,32] -> [N,10]` runtime execution, and compare one batch-eight call with eight serial batch-one calls over identical prepared tensors. Pre-register a 50% median items/s improvement, 8/10 favorable paired runs, no group-p95 regression, and full correctness gates before implementation. | V1.2 will not expose batching to application callers even if the runtime experiment passes. Revisit public batch APIs only with a concrete CLI/server consumer; another batch size or optimization needs a new decision before measurement. | Tested negative and rolled back at C8 |
+| D-33 | Freeze the v1.2 paired sampling and aggregation recipe before its first performance run. | Choose counts after observing variance; compare separate sessions; retain summaries only; replace outlier runs. | D-32 fixed thresholds but left sample counts, inputs, and tail aggregation underspecified, allowing accidental post-result tuning. | In ten fresh processes, use one session and eight prepared rows with byte `i` in row `r` equal to `(i*37+r*17)%256`; run 20 warm-ups and 200 measured eight-item workloads per mode; alternate order. Per-run items/s is `1600/sum(group_ms)*1000`; median averages sorted ratios five and six; stability counts ratios above one; pooled p95 uses nearest rank over 2,000 samples per mode. Verify exact source/model/runtime/build provenance before run one and abort without selective replacement. | The result applies only to the frozen Apple M4/macOS 26.4/AppleClang 21/ORT 1.19.2 environment and exact graph. A different batch size or optimization needs a new pre-registration. | Validated at C8 |
 
 ## Introspection checkpoints
 
@@ -408,6 +409,60 @@ G advances to C6 source/version/claim reconciliation.
 
 **Result:** Gates A–G pass in their stated scopes. V1.1 is ready as a source release with
 reproducible local reference-model evidence, not as a binary-model distribution.
+
+### C7 — v1.2 candidate and pre-measurement checkpoint (2026-07-15, completed)
+
+**Why and how**
+
+- Candidate commit `c4c4b1e` added runtime-only `[N,3,32,32] -> [N,10]` execution for
+  `1 <= N <= 256` by extending validated values and the existing ONNX adapter. The backend
+  interface, preprocessing, decoder, pipeline, and CLI stayed unchanged and batch-one.
+- Dynamic input/output batch metadata had to agree; fixed batch one remained compatible; mixed
+  axes and other fixed batches failed at construction. Output shape, count, finiteness, row order,
+  batch bounds, and trained batch-versus-single parity were independently tested.
+- Candidate gates passed 13/13 full Release ORT/Python CTest entries, 3/3 sanitizer portable tests,
+  3/3 CMake 3.16.8/Rosetta portable tests, 18/18 Python pipeline tests, six experiment-runner unit
+  tests, trained batch-versus-single `1e-5` parity, and trained PyTorch/ORT batch-eight parity of
+  `2.6226044e-06 < 1e-4` with matching classes. The v1.1 bundle's lightweight and deep audits also
+  remained green.
+- The source-controlled runner required a clean candidate commit; exact Release/AppleClang/C++17
+  metadata; Apple M4/macOS 26.4; model, ORT library, benchmark binary, and source hashes; a new
+  output directory; ten unique commands; all raw samples/logs; and D-33's frozen math.
+
+**Result:** correctness and provenance prerequisites passed. No performance result existed before
+the one official D-33 invocation.
+
+### C8 — v1.2 measured result and rollback checkpoint (2026-07-15, completed)
+
+**Measured outcome**
+
+- The official experiment completed all ten processes without replacement. Candidate source was
+  `c4c4b1ee7286c01178873c3f5efbdcb88b5abc69`; benchmark SHA-256 was
+  `5f67798f63c39b0f16d1ee45bb856d15a528cf85b79a8c1741cdc19639e1e977`; model SHA-256 was
+  `fec6ac786c75d2e328618a021763b408b993b9d6246772bf305eb3cd996b255c`; ORT library SHA-256 was
+  `183dca3132c8f0e2f0a1a30da3bcf7dee634cd6a7d5bf99b47f3d7ffe2791799`.
+- The ten batch/serial items-per-second ratios were `1.128345`, `1.113840`, `1.427021`, `1.185514`,
+  `1.057172`, `0.962638`, `1.217379`, `1.131606`, `1.077643`, and `0.844187`.
+- Median ratio was `1.121093`, a `12.1093%` improvement. This failed D-32's required `1.5` ratio
+  (50% improvement). Exactly 8/10 runs favored batch, satisfying stability. Pooled batch-eight
+  group p95 was `3.854375 ms` versus serial-eight `4.361750 ms`, satisfying the no-regression gate.
+- The ignored local evidence directory is `artifacts/v1.2-batch-experiment-official-c4c4b1e`.
+  All 33 files listed by `SHA256SUMS` verify. Summary SHA-256 is
+  `2e65ec3f2f9f7156cd3f288ce44b35d15ac5527c997b0dc0c822f01ba92b3ed0`; `SHA256SUMS` SHA-256 is
+  `22f3c5a94ab1794570b3b2079c26f2860168ee4810713e6b72326b078292675a`.
+
+**Decision and introspection**
+
+- All three performance gates were conjunctive, so passing stability and tail latency could not
+  compensate for missing the frozen primary throughput target. The 50% threshold was not lowered
+  after seeing 12.1%.
+- Rollback commit `ab6ca61` removed the candidate runtime/API, benchmark, and test tooling. The
+  current source tree again matches v1.1 runtime behavior and remains project version `1.1.0`.
+- This negative experiment is useful evidence: for this small CPU model and exact runtime, batch
+  eight does not justify the additional runtime contract under the pre-agreed value threshold.
+
+**Result:** no v1.2 release or batching claim is made. Another batch size, threading policy, buffer
+reuse design, or optimization requires a new decision before implementation or measurement.
 
 ## How to update this record
 

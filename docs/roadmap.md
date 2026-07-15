@@ -73,12 +73,15 @@ definition alone.
 ### V1.2 — measured optimization
 
 - [x] Establish the v1.1 reference Release measurement and immutable model hash.
-- [ ] Run the pre-registered runtime-only serial-eight versus batch-eight experiment.
-- [ ] Keep runtime batching only if correctness passes, median items/s improves at least 50%, at
-  least 8/10 paired runs favor batching, and group p95 does not regress.
-- [ ] Defer ORT session/thread and graph-optimization experiments until after the frozen batch
-  decision; each needs separate pre-registration.
+- [x] Run the pre-registered runtime-only serial-eight versus batch-eight experiment.
+- [x] Apply the frozen decision: batch passed correctness, 8/10 stability, and tail latency, but its
+  12.1093% median throughput improvement missed the required 50%; roll it back and retain evidence.
+- [ ] Keep any ORT session/thread or graph-optimization experiment separate and require a new
+  pre-registered decision before implementation or measurement.
 - [ ] Consider buffer reuse only through a separate pre-registered experiment.
+
+V1.2 was not released. The negative result is recorded at C8; project behavior and version remain
+at v1.1 until a separately pre-registered change earns a release.
 
 ### V2 — serving and packaging
 

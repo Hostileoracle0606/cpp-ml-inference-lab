@@ -258,6 +258,8 @@ samples/                           user-provided PPM inputs
 V1.1 is a single-model, single-caller CPU inference lab with a local 79.90% CIFAR-10 reference
 result in its exact recorded environment. It makes no MPS, server, concurrency, GPU,
 security-hardening, production image-decoder, artifact-publication, or portable-latency claim. The
-pre-registered v1.2 experiment measures runtime-only batch economics without changing the
-single-image CLI/pipeline. Later boundaries are listed in [docs/roadmap.md](docs/roadmap.md), and
-decisions must be updated in [docs/decision_matrix.md](docs/decision_matrix.md) before they change.
+pre-registered v1.2 batch-eight experiment completed but missed its frozen primary throughput gate,
+so its runtime/API candidate was rolled back and no v1.2 release was made. The single-image
+CLI/pipeline remains unchanged. Later boundaries are listed in [docs/roadmap.md](docs/roadmap.md),
+and decisions must be updated in [docs/decision_matrix.md](docs/decision_matrix.md) before they
+change.
