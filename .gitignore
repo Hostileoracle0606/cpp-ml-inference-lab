@@ -1,5 +1,6 @@
 # ─── C++ / CMake build artifacts ───────────────────────────────
 build/
+build-*/
 cmake-build-*/
 *.o
 *.obj
@@ -27,6 +28,7 @@ models/*.pt
 models/*.pth
 models/*.onnx
 !models/.gitkeep
+artifacts/
 
 # ─── Datasets (downloaded at train time) ───────────────────────
 data/

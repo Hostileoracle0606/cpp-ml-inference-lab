@@ -1,10 +1,8 @@
-// C++ ML Inference Lab — CLI entry point.
-//
-// Stage 0: a compilable skeleton. It parses the --model / --image arguments and
-// prints a plan, so `cmake --build` yields a working `infer` binary immediately.
-// The real ONNX Runtime inference path is implemented in Stage 3 via the
-// InferenceEngine class (include/inference_engine.hpp).
+#include "cpp_ml/inference_engine.hpp"
+#include "cpp_ml/pipeline.hpp"
 
+#include <exception>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -12,32 +10,54 @@
 namespace {
 
 constexpr std::string_view kUsage =
-    "Usage: infer --model <path.onnx> --image <path.png>\n"
+    "Usage: infer --model <path.onnx> --image <path.ppm>\n"
+    "\n"
+    "Run CIFAR-10 inference for one RGB image. The portable v1 image loader\n"
+    "accepts binary P6 and ASCII P3 PPM files.\n"
+    "\n"
+    "Required:\n"
+    "  --model <path>   Exported CIFAR-10 ONNX model\n"
+    "  --image <path>   RGB PPM input image\n"
     "\n"
     "Options:\n"
-    "  --model <path>   Path to the exported ONNX model (models/cifar10_cnn.onnx)\n"
-    "  --image <path>   Path to an input image (samples/cat.png)\n"
     "  -h, --help       Show this help and exit\n";
 
-struct Args {
+struct Arguments {
     std::string model;
     std::string image;
     bool help = false;
 };
 
-// Minimal hand-rolled parser — no external dependency for a two-flag CLI.
-// Returns false on a malformed flag (missing value / unknown option).
-bool parse_args(int argc, char** argv, Args& out) {
-    for (int i = 1; i < argc; ++i) {
-        const std::string_view arg = argv[i];
-        if (arg == "-h" || arg == "--help") {
-            out.help = true;
-        } else if (arg == "--model" && i + 1 < argc) {
-            out.model = argv[++i];
-        } else if (arg == "--image" && i + 1 < argc) {
-            out.image = argv[++i];
+bool consume_value(int argc, char** argv, int& index, std::string& destination,
+                   std::string_view option) {
+    if (!destination.empty()) {
+        std::cerr << "Argument provided more than once: " << option << '\n';
+        return false;
+    }
+    if (index + 1 >= argc || std::string_view(argv[index + 1]).empty() ||
+        std::string_view(argv[index + 1]).front() == '-') {
+        std::cerr << "Missing value for argument: " << option << '\n';
+        return false;
+    }
+    destination = argv[++index];
+    return true;
+}
+
+bool parse_arguments(int argc, char** argv, Arguments& arguments) {
+    for (int index = 1; index < argc; ++index) {
+        const std::string_view argument = argv[index];
+        if (argument == "-h" || argument == "--help") {
+            arguments.help = true;
+        } else if (argument == "--model") {
+            if (!consume_value(argc, argv, index, arguments.model, argument)) {
+                return false;
+            }
+        } else if (argument == "--image") {
+            if (!consume_value(argc, argv, index, arguments.image, argument)) {
+                return false;
+            }
         } else {
-            std::cerr << "Unknown or incomplete argument: " << arg << "\n";
+            std::cerr << "Unknown argument: " << argument << '\n';
             return false;
         }
     }
@@ -47,29 +67,36 @@ bool parse_args(int argc, char** argv, Args& out) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    Args args;
-    if (!parse_args(argc, argv, args)) {
-        std::cerr << "\n" << kUsage;
+    Arguments arguments;
+    if (!parse_arguments(argc, argv, arguments)) {
+        std::cerr << '\n' << kUsage;
         return 2;
     }
-    if (args.help || (args.model.empty() && args.image.empty())) {
+    if (arguments.help) {
         std::cout << kUsage;
         return 0;
     }
+    if (arguments.model.empty() || arguments.image.empty()) {
+        std::cerr << "Both --model and --image are required.\n\n" << kUsage;
+        return 2;
+    }
 
-    std::cout << "C++ ML Inference Lab\n"
-              << "  model: " << (args.model.empty() ? "(none)" : args.model) << "\n"
-              << "  image: " << (args.image.empty() ? "(none)" : args.image) << "\n";
+    try {
+        cpp_ml::InferenceEngine engine(
+            cpp_ml::make_onnxruntime_backend(arguments.model));
+        cpp_ml::InferencePipeline pipeline(std::move(engine));
+        const auto prediction = pipeline.predict_file(arguments.image);
 
-#ifdef WITH_ONNXRUNTIME
-    std::cout << "  build: ONNX Runtime linked\n";
-#else
-    std::cout << "  build: skeleton (configure with -DWITH_ONNXRUNTIME=ON for Stage 3)\n";
-#endif
-
-    std::cout << "\n[Stage 0] Inference is not wired up yet.\n"
-              << "Next: implement InferenceEngine::predict() in Stage 3 to load the\n"
-              << "ONNX model, preprocess the image, run the session, and print:\n"
-              << "  Prediction: <label>\n  Confidence: <0..1>\n  Latency:    <ms>\n";
-    return 0;
+        std::cout << std::fixed << std::setprecision(3)
+                  << "Prediction: " << prediction.label << '\n'
+                  << "Class index: " << prediction.class_index << '\n'
+                  << "Confidence: " << prediction.confidence << '\n'
+                  << "Latency:    " << prediction.latency_ms << " ms\n"
+                  << "  preprocess: " << prediction.preprocessing_ms << " ms\n"
+                  << "  inference:  " << prediction.inference_ms << " ms\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "Inference failed: " << error.what() << '\n';
+        return 1;
+    }
 }

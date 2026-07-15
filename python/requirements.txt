@@ -1,5 +1,5 @@
 # Python toolchain for training, export, and parity checking.
-# Pin minor versions for reproducibility; let patch float.
+# Minimum compatible versions for v1; a fully locked environment is deferred.
 torch>=2.2
 torchvision>=0.17
 onnx>=1.16
