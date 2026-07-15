@@ -65,19 +65,3 @@ expect_benchmark_error(unknown_argument "unknown argument.*--unknown"
     --unknown 1)
 expect_benchmark_error(missing_value "missing value.*--iterations"
     --iterations)
-expect_benchmark_error(paired_missing_run "requires --paired-run"
-    --paired-batch --json-out "${CMAKE_CURRENT_BINARY_DIR}/paired.json")
-expect_benchmark_error(paired_missing_json "requires --json-out"
-    --paired-batch --paired-run 1)
-expect_benchmark_error(paired_run_above_ten "value from 1 to 10"
-    --paired-batch --paired-run 11 --json-out "${CMAKE_CURRENT_BINARY_DIR}/paired.json")
-expect_benchmark_error(paired_custom_warmup "frozen at --warmup 20 --iterations 200"
-    --paired-batch --paired-run 1 --json-out "${CMAKE_CURRENT_BINARY_DIR}/paired.json"
-    --warmup 19)
-expect_benchmark_error(paired_custom_iterations "frozen at --warmup 20 --iterations 200"
-    --paired-batch --paired-run 1 --json-out "${CMAKE_CURRENT_BINARY_DIR}/paired.json"
-    --iterations 199)
-expect_benchmark_error(orphan_paired_run "require --paired-batch"
-    --paired-run 1)
-expect_benchmark_error(paired_missing_model "requires --model"
-    --paired-batch --paired-run 1 --json-out "${CMAKE_CURRENT_BINARY_DIR}/paired.json")

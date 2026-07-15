@@ -1,6 +1,7 @@
 #include "cpp_ml/inference_engine.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -11,24 +12,6 @@
 #endif
 
 namespace cpp_ml {
-namespace {
-
-constexpr std::int64_t kMaximumRuntimeBatch = 256;
-
-std::int64_t validate_cifar10_input(const Tensor& input) {
-    if (input.shape.size() != 4 || input.shape[1] != 3 || input.shape[2] != 32 ||
-        input.shape[3] != 32) {
-        throw std::invalid_argument(
-            "CIFAR-10 runtime inference expects shape [N,3,32,32]");
-    }
-    if (input.shape[0] < 1 || input.shape[0] > kMaximumRuntimeBatch) {
-        throw std::invalid_argument("CIFAR-10 runtime batch size must be between 1 and 256");
-    }
-    input.validate();
-    return input.shape[0];
-}
-
-}  // namespace
 
 InferenceEngine::InferenceEngine(std::unique_ptr<IInferenceBackend> backend)
     : backend_(std::move(backend)) {
@@ -42,18 +25,14 @@ InferenceEngine::InferenceEngine(InferenceEngine&&) noexcept = default;
 InferenceEngine& InferenceEngine::operator=(InferenceEngine&&) noexcept = default;
 
 ModelOutput InferenceEngine::infer(const Tensor& input) {
-    const auto batch_size = validate_cifar10_input(input);
+    input.validate();
     auto output = backend_->run(input);
-    try {
-        output.validate();
-    } catch (const std::invalid_argument& error) {
-        throw std::runtime_error(std::string("inference backend returned invalid output: ") +
-                                 error.what());
+    if (output.logits.empty()) {
+        throw std::runtime_error("inference backend returned no logits");
     }
-    const std::vector<std::int64_t> expected_shape{batch_size, 10};
-    if (output.shape != expected_shape) {
+    if (!std::isfinite(output.inference_ms) || output.inference_ms < 0.0) {
         throw std::runtime_error(
-            "inference backend output shape must match runtime input batch as [N,10]");
+            "inference backend returned a non-finite or negative duration");
     }
     return output;
 }
@@ -99,8 +78,9 @@ public:
             throw std::runtime_error("ONNX input must have float32 element type");
         }
         const auto input_shape = input_info.GetShape();
-        if (input_shape.size() != 4 || input_shape[1] != 3 || input_shape[2] != 32 ||
-            input_shape[3] != 32) {
+        if (input_shape.size() != 4 ||
+            (input_shape[0] != -1 && input_shape[0] != 1) ||
+            input_shape[1] != 3 || input_shape[2] != 32 || input_shape[3] != 32) {
             throw std::runtime_error("ONNX input must be NCHW [N,3,32,32]");
         }
 
@@ -110,29 +90,18 @@ public:
             throw std::runtime_error("ONNX logits must have float32 element type");
         }
         const auto output_shape = output_info.GetShape();
-        if (output_shape.size() != 2 || output_shape[1] != 10) {
+        if (output_shape.size() != 2 ||
+            (output_shape[0] != -1 && output_shape[0] != 1) ||
+            output_shape[1] != 10) {
             throw std::runtime_error("ONNX logits must have shape [N,10]");
         }
-
-        const auto input_batch = input_shape[0];
-        const auto output_batch = output_shape[0];
-        if ((input_batch != -1 && input_batch != 1) ||
-            (output_batch != -1 && output_batch != 1)) {
-            throw std::runtime_error(
-                "ONNX batch axes must both be dynamic or both be fixed at one");
-        }
-        if ((input_batch == -1) != (output_batch == -1)) {
-            throw std::runtime_error(
-                "ONNX input and logits batch axes must use matching dynamic or fixed metadata");
-        }
-        dynamic_batch_ = input_batch == -1;
     }
 
     ModelOutput run(const Tensor& input) override {
-        const auto batch_size = validate_cifar10_input(input);
-        if (!dynamic_batch_ && batch_size != 1) {
+        if (input.shape.size() != 4 || input.shape[0] != 1 || input.shape[1] != 3 ||
+            input.shape[2] != 32 || input.shape[3] != 32) {
             throw std::invalid_argument(
-                "fixed-batch-one ONNX model cannot execute a runtime batch larger than one");
+                "ONNX CIFAR-10 inference expects shape [1,3,32,32]");
         }
 
         auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
@@ -154,16 +123,12 @@ public:
             throw std::runtime_error("ONNX logits output must have float32 element type");
         }
         const auto output_shape = output_info.GetShape();
-        const std::vector<std::int64_t> expected_shape{batch_size, 10};
-        if (output_shape != expected_shape) {
-            throw std::runtime_error(
-                "ONNX logits runtime shape must match the input batch as [N,10]");
+        if (output_shape != std::vector<std::int64_t>({1, 10})) {
+            throw std::runtime_error("ONNX logits output must have runtime shape [1,10]");
         }
         const auto count = output_info.GetElementCount();
-        const auto expected_count = static_cast<std::size_t>(batch_size) * 10U;
-        if (count != expected_count) {
-            throw std::runtime_error(
-                "ONNX logits value count must equal runtime batch size times 10");
+        if (count != 10) {
+            throw std::runtime_error("ONNX logits output must contain 10 values for batch 1");
         }
         const float* values = outputs.front().GetTensorData<float>();
 
@@ -171,7 +136,6 @@ public:
         result.logits.assign(values, values + count);
         result.inference_ms =
             std::chrono::duration<double, std::milli>(finished - started).count();
-        result.shape = output_shape;
         return result;
     }
 
@@ -181,7 +145,6 @@ private:
     Ort::Session session_;
     std::string input_name_;
     std::string output_name_;
-    bool dynamic_batch_ = false;
 };
 
 }  // namespace

@@ -2,9 +2,8 @@
 
 ## Status
 
-Pre-measurement candidate. The runtime-only batching implementation and correctness gates are
-complete after the v1.1 tag; no official paired performance result exists yet. D-32/D-33 remain the
-frozen acceptance contract, and the source candidate is committed before process one.
+Pre-implementation contract. No v1.2 batching code or performance result exists yet. Work starts
+only after the v1.1 source tag and its local r2 evidence bundle are complete.
 
 ## Goal
 
@@ -62,28 +61,18 @@ hierarchy.
 - Artifact: the exact ONNX SHA-256 accepted by the v1.1 r2 bundle.
 - Build/runtime: Release, AppleClang, ONNX Runtime 1.19.2 CPU, same recorded Apple reference
   machine and operating system.
-- Provenance preflight: before process one, verify the ONNX SHA-256 and exact ORT 1.19.2 library
-  SHA-256/linkage, require the frozen Apple M4/macOS 26.4/AppleClang 21 Release scope and a clean
-  candidate source commit, and record that commit plus the benchmark executable's SHA-256.
-- Inputs: eight deterministic but distinct synthetic images. Pixel byte `i` in zero-based row `r`
-  is `(i*37 + r*17) % 256`. Images are prepared before timing and concatenated in row order for
-  batch mode; serial mode uses those exact eight prepared rows in the same order. Session
-  construction and file I/O remain outside measurement.
+- Inputs: the same prepared tensor values for both modes; session construction and file I/O remain
+  outside measurement.
 - Candidate: batch 8. Batch 2/4/16 are not measured and then selected.
-- Sampling: exactly 10 independent paired process runs using one persistent session per process,
-  20 warm-up workloads per mode, and 200 measured workloads per mode. Odd runs execute serial then
-  batch; even runs execute batch then serial. A failed, crashed, or malformed run aborts the whole
-  experiment; no selective or result-dependent rerun replaces a sampled run.
+- Sampling: exactly 10 independent paired process runs, alternating serial/batch order; each
+  process uses identical warm-up and measured iteration counts and persistent identically
+  configured sessions.
 - Work accounting: every serial sample performs eight batch-one calls and every batch sample
   performs one batch-eight call over the same tensor rows.
-- Primary metric: for each mode within each process, items/s is
-  `1600 / sum(200 group-latency samples in ms) * 1000`. Divide batch items/s by serial items/s,
-  sort the ten ratios, then average the fifth and sixth values as the even-sample median.
+- Primary metric: median items/second speedup across paired process runs.
 - Stability metric: at least eight of ten runs must favor batch eight.
-- Tail metric: retain all 200 measured group-latency samples from each process; batch-eight p95 over
-  the combined 2,000 samples must not exceed serial-eight p95 over its combined 2,000 samples. P95
-  uses nearest rank: sort samples and select rank `ceil(0.95*N)`. This compares the time to finish
-  the same eight-item workload, not a fictional per-item latency.
+- Tail metric: batch-eight group p95 must not exceed serial-eight group p95. This compares the time
+  to finish the same eight-item workload, not a fictional per-item latency.
 
 ## Acceptance and rollback
 

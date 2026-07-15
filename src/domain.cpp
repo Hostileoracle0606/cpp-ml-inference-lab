@@ -1,7 +1,5 @@
 #include "cpp_ml/domain.hpp"
 
-#include <algorithm>
-#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -46,35 +44,6 @@ void Tensor::validate() const {
     }
     if (values.size() != element_count()) {
         throw std::invalid_argument("tensor value buffer does not match its shape");
-    }
-}
-
-std::size_t ModelOutput::element_count() const {
-    if (shape.empty()) {
-        throw std::invalid_argument("model output shape must not be empty");
-    }
-
-    std::size_t count = 1;
-    for (const auto dimension : shape) {
-        if (dimension <= 0) {
-            throw std::invalid_argument("model output dimensions must be positive");
-        }
-        count = checked_product(count, static_cast<std::size_t>(dimension), "model output");
-    }
-    return count;
-}
-
-void ModelOutput::validate() const {
-    if (logits.size() != element_count()) {
-        throw std::invalid_argument("model output shape does not match its logits buffer");
-    }
-    if (!std::all_of(logits.begin(), logits.end(),
-                     [](float value) { return std::isfinite(value); })) {
-        throw std::invalid_argument("model output logits must all be finite");
-    }
-    if (!std::isfinite(inference_ms) || inference_ms < 0.0) {
-        throw std::invalid_argument(
-            "model output inference time must be finite and non-negative");
     }
 }
 

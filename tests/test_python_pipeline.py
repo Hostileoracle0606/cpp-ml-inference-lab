@@ -1088,27 +1088,6 @@ class ExportParitySmokeTests(unittest.TestCase):
             self.assertTrue(parity["class_match"])
             self.assertLess(parity["max_abs_diff"], parity["tolerance"])
 
-            batch_eight_parity_path = directory / "parity-batch-eight.json"
-            self.assertTrue(
-                verify_onnx.verify(
-                    str(weights_path),
-                    str(onnx_path),
-                    tol=1.0e-4,
-                    batch_size=8,
-                    json_out=batch_eight_parity_path,
-                )
-            )
-            batch_eight_parity = json.loads(
-                batch_eight_parity_path.read_text(encoding="utf-8")
-            )
-            self.assertEqual(batch_eight_parity["batch_size"], 8)
-            self.assertTrue(batch_eight_parity["passed"])
-            self.assertTrue(batch_eight_parity["class_match"])
-            self.assertLess(
-                batch_eight_parity["max_abs_diff"],
-                batch_eight_parity["tolerance"],
-            )
-
             extra_output_path = directory / "model-extra-output.onnx"
             extra_output_model = onnx.load(str(onnx_path))
             extra_output_model.graph.node.append(

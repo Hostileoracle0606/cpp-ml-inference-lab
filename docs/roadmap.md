@@ -73,12 +73,6 @@ definition alone.
 ### V1.2 — measured optimization
 
 - [x] Establish the v1.1 reference Release measurement and immutable model hash.
-- [x] Implement the capped runtime-only `[N,3,32,32] -> [N,10]` candidate without widening the
-  single-image CLI or pipeline.
-- [x] Pass dynamic/fixed metadata, bounds, row-order, trained batch-vs-single, PyTorch parity,
-  sanitizer, legacy-release, evidence-bundle, and minimum-CMake correctness gates.
-- [x] Freeze and test a ten-process orchestrator that rejects model/source drift, retains every raw
-  sample, and applies D-33's exact aggregation rules.
 - [ ] Run the pre-registered runtime-only serial-eight versus batch-eight experiment.
 - [ ] Keep runtime batching only if correctness passes, median items/s improves at least 50%, at
   least 8/10 paired runs favor batching, and group p95 does not regress.
